@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
+import connectDB from './SRC/DB/database.js'
 import userRoutes from './SRC/routes/user.routes.js';
 import tutorRoutes from './SRC/routes/tutor.routes.js';
 // import adminRoutes from './routes/admin.routes.js';
@@ -43,8 +44,16 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const startServer  = async () => {
+   const PORT  = process.env.PORT || 2345
+   connectDB()
+   try {
+      app.listen(PORT,() => {console.log(`J-SQUAD IS RUNNING ON PORT: ${PORT}`);})
+   } catch (error) {
+      console.log(error);
+   }
+};
+
+startServer();
 
 export default app;

@@ -15,8 +15,8 @@ const router = express.Router();
 // Public routes
 router.post('/signup', signup);
 router.post('/signin', signin);
-router.get('/', getAllTutors); // Get all tutors with optional filters
-router.get('/:id', getTutorById); // Get specific tutor by ID
+router.get('/', getAllTutors);
+router.get('/:id', getTutorById);
 
 // Protected routes (require authentication)
 router.use(authenticateToken); // Apply middleware to all routes below
