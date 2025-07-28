@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-import userRoutes from './routes/user.routes.js';
-import tutorRoutes from './routes/tutor.routes.js';
+import userRoutes from './SRC/routes/user.routes.js';
+import tutorRoutes from './SRC/routes/tutor.routes.js';
 // import adminRoutes from './routes/admin.routes.js';
 
 dotenv.config();
