@@ -2,6 +2,7 @@
   "name": "tutor_v1",
   "version": "1.0.0",
   "description": "an app for tutors and students",
+  "type": "module",
   "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,8 +13,10 @@
     "argon": "^2.0.21",
     "cloudinary": "^2.7.0",
     "dotenv": "^17.2.1",
+    "googleapis": "^155.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.17.1",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.5"
   }
 }
