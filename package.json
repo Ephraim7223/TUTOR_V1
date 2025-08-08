@@ -1,0 +1,18 @@
+{
+  "name": "tutor_v1",
+  "version": "1.0.0",
+  "description": "an app for tutors and students",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "argon": "^2.0.21",
+    "cloudinary": "^2.7.0",
+    "dotenv": "^17.2.1",
+    "mongoose": "^8.17.1",
+    "multer": "^2.0.2"
+  }
+}
