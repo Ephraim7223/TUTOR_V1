@@ -5,10 +5,8 @@ import dotenv from 'dotenv';
 import connectDB from './SRC/DB/database.js'
 import userRoutes from './SRC/routes/user.routes.js';
 import tutorRoutes from './SRC/routes/tutor.routes.js';
-import userRoutes from '.SRC//routes/user.routes.js';
-import tutorRoutes from '.SRC//routes/tutor.routes.js';
-import bookingRoutes from '.SRC//routes/booking.routes.js';
-import adminRoutes from '.SRC//routes/admin.routes.js';
+import bookingRoutes from './SRC/routes/booking.routes.js';
+import adminRoutes from './SRC/routes/admin.routes.js';
 
 dotenv.config();
 
