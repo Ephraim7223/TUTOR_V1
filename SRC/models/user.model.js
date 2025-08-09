@@ -31,7 +31,13 @@ const userSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
-  }
+  },
+  // Add the wishlist field to your schema
+  wishlist: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tutor',
+    default: []
+  }]
 }, {
   timestamps: true
 });
