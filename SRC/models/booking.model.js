@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
 
 const bookingSchema = new mongoose.Schema({
-  student: {
+  studentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  tutor: {
+  // Changed from 'tutor' to 'tutorId' to match controller
+  tutorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tutor',
     required: true
@@ -16,7 +17,8 @@ const bookingSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  sessionDate: {
+  // Changed from 'sessionDate' to 'scheduledDate' to match controller
+  scheduledDate: {
     type: Date,
     required: true
   },
@@ -30,15 +32,18 @@ const bookingSchema = new mongoose.Schema({
   },
   duration: {
     type: Number,
-    required: true
+    required: true,
+    min: 0.5 // Minimum 30 minutes
   },
   hourlyRate: {
     type: Number,
-    required: true
+    required: true,
+    min: 0
   },
   totalAmount: {
     type: Number,
-    required: true
+    required: true,
+    min: 0
   },
   status: {
     type: String,
@@ -49,6 +54,11 @@ const bookingSchema = new mongoose.Schema({
     type: String,
     enum: ['online', 'in-person'],
     default: 'online'
+  },
+  meetingPreference: {
+    type: String,
+    enum: ['zoom', 'google-meet', 'skype', 'in-person', 'other'],
+    default: 'zoom'
   },
   meetingLink: {
     type: String,
@@ -72,17 +82,32 @@ const bookingSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ['pending', 'paid', 'refunded'],
+    enum: ['pending', 'paid', 'refunded', 'failed'],
     default: 'pending'
   },
-  rating: {
-    type: Number,
-    min: 1,
-    max: 5
-  },
-  review: {
+  // Added cancellation fields from controller
+  cancellationReason: {
     type: String,
     maxlength: 500
+  },
+  cancelledBy: {
+    type: String,
+    enum: ['student', 'tutor', 'admin']
+  },
+  cancelledAt: {
+    type: Date
+  },
+  // Added rescheduling fields
+  originalScheduledDate: {
+    type: Date
+  },
+  rescheduleReason: {
+    type: String,
+    maxlength: 500
+  },
+  rescheduledBy: {
+    type: String,
+    enum: ['student', 'tutor', 'admin']
   },
   isActive: {
     type: Boolean,
@@ -92,10 +117,24 @@ const bookingSchema = new mongoose.Schema({
   timestamps: true
 });
 
-bookingSchema.index({ tutor: 1, sessionDate: 1 });
-bookingSchema.index({ student: 1, sessionDate: 1 });
+bookingSchema.index({ tutorId: 1, scheduledDate: 1 });
+bookingSchema.index({ studentId: 1, scheduledDate: 1 });
 bookingSchema.index({ status: 1 });
+bookingSchema.index({ scheduledDate: 1 });
+bookingSchema.index({ paymentStatus: 1 });
+
+bookingSchema.virtual('sessionEndTime').get(function() {
+  if (this.scheduledDate && this.duration) {
+    return new Date(this.scheduledDate.getTime() + (this.duration * 60 * 60 * 1000));
+  }
+  return null;
+});
+
+bookingSchema.pre('save', function(next) {
+  if (this.isModified('duration') || this.isModified('hourlyRate')) {
+    this.totalAmount = this.duration * this.hourlyRate;
+  }
+  next();
+});
 
 const Booking = mongoose.model('Booking', bookingSchema);
-
-export default Booking;
