@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import argon2 from 'argon2';
 import Tutor from '../models/tutor.model.js';
+import { Booking } from '../models/booking.model.js';
+import { Rating } from '../models/rating.model.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -406,11 +408,7 @@ export const getTutorById = async (req, res) => {
 export const getDashboardStats = async (req, res) => {
   try {
     const { id } = req.user;
-    
-    // You'll need to import these models or create them
-    // import Booking from '../models/booking.model.js';
-    // import Rating from '../models/rating.model.js';
-    
+        
     // Get total bookings count
     const totalBookings = await Booking.countDocuments({ 
       tutorId: id,
