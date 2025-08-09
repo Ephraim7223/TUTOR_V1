@@ -400,3 +400,299 @@ export const getTutorById = async (req, res) => {
     });
   }
 };
+
+// NEW DASHBOARD FUNCTIONS
+
+export const getDashboardStats = async (req, res) => {
+  try {
+    const { id } = req.user;
+    
+    // You'll need to import these models or create them
+    // import Booking from '../models/booking.model.js';
+    // import Rating from '../models/rating.model.js';
+    
+    // Get total bookings count
+    const totalBookings = await Booking.countDocuments({ 
+      tutorId: id,
+      status: { $in: ['confirmed', 'completed'] }
+    });
+
+    // Get unique students count
+    const uniqueStudents = await Booking.distinct('studentId', { 
+      tutorId: id,
+      status: { $in: ['confirmed', 'completed'] }
+    });
+
+    // Calculate total earnings
+    const completedBookings = await Booking.find({ 
+      tutorId: id, 
+      status: 'completed' 
+    });
+    const totalEarnings = completedBookings.reduce((sum, booking) => {
+      return sum + (booking.totalAmount || 0);
+    }, 0);
+
+    // Get average rating
+    const ratings = await Rating.find({ tutorId: id });
+    const averageRating = ratings.length > 0 
+      ? ratings.reduce((sum, rating) => sum + rating.rating, 0) / ratings.length
+      : 0;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        totalBookings,
+        totalStudents: uniqueStudents.length,
+        totalEarnings: totalEarnings.toFixed(2),
+        averageRating: averageRating.toFixed(1),
+        totalRatings: ratings.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving dashboard stats',
+      error: error.message,
+    });
+  }
+};
+
+export const getRecentActivity = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { limit = 10 } = req.query;
+
+    // Get recent bookings with student details
+    const recentBookings = await Booking.find({ tutorId: id })
+      .populate('studentId', 'fullName email')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    // Get recent ratings
+    const recentRatings = await Rating.find({ tutorId: id })
+      .populate('studentId', 'fullName')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    // Combine and sort by date
+    const activities = [
+      ...recentBookings.map(booking => ({
+        type: 'booking',
+        action: `New booking from ${booking.studentId?.fullName || 'Unknown'}`,
+        date: booking.createdAt,
+        status: booking.status,
+        amount: booking.totalAmount
+      })),
+      ...recentRatings.map(rating => ({
+        type: 'rating',
+        action: `Received ${rating.rating}-star rating from ${rating.studentId?.fullName || 'Unknown'}`,
+        date: rating.createdAt,
+        rating: rating.rating,
+        comment: rating.comment
+      }))
+    ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, parseInt(limit));
+
+    res.status(200).json({
+      status: 'success',
+      data: activities
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving recent activity',
+      error: error.message,
+    });
+  }
+};
+
+export const getUpcomingLessons = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { limit = 10 } = req.query;
+
+    const now = new Date();
+    const upcomingLessons = await Booking.find({
+      tutorId: id,
+      status: 'confirmed',
+      scheduledDate: { $gte: now }
+    })
+    .populate('studentId', 'fullName email')
+    .sort({ scheduledDate: 1 })
+    .limit(parseInt(limit));
+
+    const formattedLessons = upcomingLessons.map(lesson => ({
+      id: lesson._id,
+      student: lesson.studentId?.fullName || 'Unknown',
+      studentEmail: lesson.studentId?.email,
+      subject: lesson.subject,
+      date: lesson.scheduledDate,
+      duration: lesson.duration,
+      amount: lesson.totalAmount,
+      meetingLink: lesson.meetingLink,
+      status: lesson.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: formattedLessons
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving upcoming lessons',
+      error: error.message,
+    });
+  }
+};
+
+export const getBookingHistory = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { page = 1, limit = 10, status, startDate, endDate } = req.query;
+
+    const query = { tutorId: id };
+
+    // Add filters
+    if (status) {
+      query.status = status;
+    }
+    if (startDate || endDate) {
+      query.scheduledDate = {};
+      if (startDate) query.scheduledDate.$gte = new Date(startDate);
+      if (endDate) query.scheduledDate.$lte = new Date(endDate);
+    }
+
+    const bookings = await Booking.find(query)
+      .populate('studentId', 'fullName email')
+      .sort({ scheduledDate: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Booking.countDocuments(query);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        bookings,
+        totalPages: Math.ceil(total / limit),
+        currentPage: parseInt(page),
+        total
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving booking history',
+      error: error.message,
+    });
+  }
+};
+
+export const updateAvailability = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { availability } = req.body;
+
+    if (!availability || !Array.isArray(availability)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Valid availability array is required',
+      });
+    }
+
+    const tutor = await Tutor.findById(id);
+    if (!tutor) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Tutor not found',
+      });
+    }
+
+    tutor.availability = availability;
+    await tutor.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Availability updated successfully',
+      data: tutor.availability
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while updating availability',
+      error: error.message,
+    });
+  }
+};
+
+export const getEarningsReport = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { startDate, endDate, groupBy = 'month' } = req.query;
+
+    const matchStage = {
+      tutorId: id,
+      status: 'completed'
+    };
+
+    if (startDate || endDate) {
+      matchStage.scheduledDate = {};
+      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
+      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
+    }
+
+    let groupStage;
+    if (groupBy === 'day') {
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 }
+        }
+      };
+    } else if (groupBy === 'week') {
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-W%V", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 }
+        }
+      };
+    } else { // month
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 }
+        }
+      };
+    }
+
+    const earnings = await Booking.aggregate([
+      { $match: matchStage },
+      groupStage,
+      { $sort: { _id: 1 } }
+    ]);
+
+    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
+    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        earnings,
+        summary: {
+          totalEarnings: totalEarnings.toFixed(2),
+          totalLessons,
+          averagePerLesson: totalLessons > 0 ? (totalEarnings / totalLessons).toFixed(2) : 0
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while generating earnings report',
+      error: error.message,
+    });
+  }
+};
