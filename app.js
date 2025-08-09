@@ -12,8 +12,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/api/v1', router)
-
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'success',
@@ -21,6 +19,15 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+console.log('About to load routes...');
+try {
+  app.use('/api/v1', router);
+  console.log('Routes loaded successfully');
+} catch (error) {
+  console.error('Error loading routes:', error.message);
+}
+
 
 app.use('*', (req, res) => {
   res.status(404).json({
