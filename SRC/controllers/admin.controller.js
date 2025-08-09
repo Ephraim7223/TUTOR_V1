@@ -1,7 +1,7 @@
 import User from '../models/user.model.js';
 import Tutor from '../models/tutor.model.js';
 import { Booking } from '../models/booking.model.js';
-import Rating from '../models/rating.model.js';
+import { Rating } from '../models/rating.model.js';
 
 // USER MANAGEMENT
 

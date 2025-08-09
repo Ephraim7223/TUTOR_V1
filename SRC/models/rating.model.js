@@ -1,3 +1,5 @@
+import mongoose from 'mongoose';
+
 const ratingSchema = new mongoose.Schema({
   studentId: {
     type: mongoose.Schema.Types.ObjectId,

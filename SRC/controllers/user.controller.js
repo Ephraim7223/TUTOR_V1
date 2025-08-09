@@ -2,8 +2,8 @@ import jwt from 'jsonwebtoken';
 import argon2 from 'argon2';
 import User from '../models/user.model.js';
 import Tutor from '../models/tutor.model.js';
-import Booking from '../models/booking.model.js';
-import Rating from '../models/rating.model.js';
+import { Booking } from '../models/booking.model.js';
+import { Rating } from '../models/rating.model.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
