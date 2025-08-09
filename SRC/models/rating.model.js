@@ -76,17 +76,14 @@ const ratingSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes
 ratingSchema.index({ tutorId: 1, createdAt: -1 });
 ratingSchema.index({ studentId: 1, createdAt: -1 });
-ratingSchema.index({ bookingId: 1 }, { unique: true }); // One rating per booking
+ratingSchema.index({ bookingId: 1 }, { unique: true });
 ratingSchema.index({ rating: 1 });
 ratingSchema.index({ isActive: 1 });
 
-// Compound index to prevent duplicate ratings
 ratingSchema.index({ studentId: 1, tutorId: 1, bookingId: 1 }, { unique: true });
 
-// Virtual for average of detailed ratings
 ratingSchema.virtual('detailedAverage').get(function() {
   const ratings = [this.teachingQuality, this.communication, this.punctuality, this.helpfulness]
     .filter(rating => rating != null);
@@ -96,7 +93,6 @@ ratingSchema.virtual('detailedAverage').get(function() {
   return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
 });
 
-// Static method to calculate tutor's average rating
 ratingSchema.statics.calculateTutorAverage = async function(tutorId) {
   const result = await this.aggregate([
     { $match: { tutorId: new mongoose.Types.ObjectId(tutorId), isActive: true } },
@@ -113,7 +109,6 @@ ratingSchema.statics.calculateTutorAverage = async function(tutorId) {
   ]);
 
   if (result.length > 0) {
-    // Calculate rating distribution
     const breakdown = result[0].ratingBreakdown.reduce((acc, rating) => {
       acc[rating] = (acc[rating] || 0) + 1;
       return acc;

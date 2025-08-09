@@ -5,7 +5,10 @@ import dotenv from 'dotenv';
 import connectDB from './SRC/DB/database.js'
 import userRoutes from './SRC/routes/user.routes.js';
 import tutorRoutes from './SRC/routes/tutor.routes.js';
-// import adminRoutes from './routes/admin.routes.js';
+import userRoutes from '.SRC//routes/user.routes.js';
+import tutorRoutes from '.SRC//routes/tutor.routes.js';
+import bookingRoutes from '.SRC//routes/booking.routes.js';
+import adminRoutes from '.SRC//routes/admin.routes.js';
 
 dotenv.config();
 
@@ -17,6 +20,8 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/users', userRoutes);
 app.use('/api/tutors', tutorRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({

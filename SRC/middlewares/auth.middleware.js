@@ -1,10 +1,14 @@
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import { Booking } from '../models/booking.model.js';
+import User from '../models/user.model.js';
+import Tutor from '../models/tutor.model.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
 export const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({
@@ -26,7 +30,6 @@ export const authenticateToken = (req, res, next) => {
   });
 };
 
-// Middleware to check if user has specific role
 export const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -47,14 +50,62 @@ export const authorizeRoles = (...roles) => {
   };
 };
 
-// Middleware to check if user is admin
 export const requireAdmin = authorizeRoles('admin');
 
-// Middleware to check if user is tutor
 export const requireTutor = authorizeRoles('tutor');
 
-// Middleware to check if user is regular user
 export const requireUser = authorizeRoles('user');
 
-// Middleware to allow multiple roles
 export const requireUserOrTutor = authorizeRoles('user', 'tutor');
+
+export const authorizeBookingAccess = async (req, res, next) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid booking ID format'
+      });
+    }
+
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Booking not found'
+      });
+    }
+
+    let hasAccess = false;
+
+    if (userRole === 'admin') {
+      // Admins can access all bookings
+      hasAccess = true;
+    } else if (userRole === 'user' && booking.studentId.toString() === userId) {
+      // Students can access their own bookings
+      hasAccess = true;
+    } else if (userRole === 'tutor' && booking.tutorId.toString() === userId) {
+      // Tutors can access bookings they're assigned to
+      hasAccess = true;
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access denied. You can only access your own bookings.'
+      });
+    }
+
+    req.booking = booking;
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      status: 'error',
+      message: 'Error checking booking access',
+      error: error.message
+    });
+  }
+};
