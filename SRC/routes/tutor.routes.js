@@ -39,10 +39,10 @@ router.get('/dashboard/activity', getRecentActivity);
 router.get('/dashboard/upcoming', getUpcomingLessons);
 
 // Booking management routes
-router.get('/bookings', getBookingHistory);
+router.get('/bookings/all', getBookingHistory);
 
 // Availability management
-router.put('/availability', updateAvailability);
+router.put('/availability/update', updateAvailability);
 
 // Reports
 router.get('/reports/earnings', getEarningsReport);

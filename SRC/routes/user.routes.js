@@ -6,18 +6,13 @@ import {
   updatePassword,
   getMe,
   updateProfile,
-  // Booking functions
   createBooking,
   getUserBookings,
   cancelBooking,
-  // Rating functions
   rateTutor,
   getUserRatings,
-  // Dashboard functions
   getUserDashboard,
-  // Search functions
   searchTutors,
-  // Wishlist functions
   addToWishlist,
   removeFromWishlist,
   getWishlist
@@ -29,12 +24,10 @@ const router = express.Router();
 // Public routes
 router.post('/signup', signup);
 router.post('/signin', signin);
-
-// Public search route (users can search tutors without being logged in)
 router.get('/search-tutors', searchTutors);
 
 // Protected routes (require authentication)
-router.use(authenticateToken); // Apply middleware to all routes below
+router.use(authenticateToken);
 
 // Profile routes
 router.get('/me', getMe);
