@@ -43,7 +43,7 @@ router.get('/bookings', getUserBookings);
 router.put('/bookings/:bookingId/cancel', cancelBooking);
 
 // Rating routes
-router.post('/tutors/:tutorId/rate', rateTutor);
+router.post('/tutor/:tutorId/rate', rateTutor);
 router.get('/ratings', getUserRatings);
 
 // Wishlist routes

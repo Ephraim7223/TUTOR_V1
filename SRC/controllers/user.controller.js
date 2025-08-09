@@ -290,16 +290,21 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // Calculate total amount
+    // Calculate total amount and time slots
     const totalAmount = tutor.hourlyRate * duration;
+    const startTime = new Date(scheduledDate);
+    const endTime = new Date(startTime.getTime() + duration * 60 * 60 * 1000);
 
     // Check for booking conflicts
     const conflictingBooking = await Booking.findOne({
       tutorId,
-      scheduledDate: {
-        $gte: new Date(scheduledDate),
-        $lt: new Date(new Date(scheduledDate).getTime() + duration * 60 * 60 * 1000)
-      },
+      $or: [
+        {
+          // New booking starts during existing booking
+          startTime: { $lt: endTime },
+          endTime: { $gt: startTime }
+        }
+      ],
       status: { $in: ['pending', 'confirmed'] }
     });
 
@@ -314,8 +319,11 @@ export const createBooking = async (req, res) => {
       studentId: id,
       tutorId,
       subject,
-      scheduledDate: new Date(scheduledDate),
+      scheduledDate: startTime,
+      startTime: startTime,
+      endTime: endTime,
       duration,
+      hourlyRate: tutor.hourlyRate,
       totalAmount,
       notes,
       meetingPreference,
