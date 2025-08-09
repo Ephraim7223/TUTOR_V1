@@ -1,12 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-
 import connectDB from './SRC/DB/database.js'
-import userRoutes from './SRC/routes/user.routes.js';
-import tutorRoutes from './SRC/routes/tutor.routes.js';
-import bookingRoutes from './SRC/routes/booking.routes.js';
-import adminRoutes from './SRC/routes/admin.routes.js';
+import router from './SRC/routes/index.js'
 
 dotenv.config();
 
@@ -16,10 +12,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/api/users', userRoutes);
-app.use('/api/tutors', tutorRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/v1', router)
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({
