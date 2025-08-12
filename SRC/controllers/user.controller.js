@@ -4,14 +4,506 @@ import User from '../models/user.model.js';
 import Tutor from '../models/tutor.model.js';
 import { Booking } from '../models/booking.model.js';
 import { Rating } from '../models/rating.model.js';
+import { mailTransport } from '../config/googleapis.js';
+import { mailGenerator } from '../config/mailgen.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Email Templates Class for Students
+class StudentEmailTemplates {
+  
+  // Welcome email for new student signup
+  static generateWelcomeEmail(userData) {
+    const { fullName, email, location } = userData;
+    
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: [
+          'Welcome to TUTOR! 🎓',
+          'Your student account has been successfully created. You can now start finding and booking amazing tutors!'
+        ],
+        action: {
+          instructions: 'Start exploring our tutors and book your first lesson today.',
+          button: {
+            color: '#22BC66',
+            text: 'Find Tutors',
+            link: `${process.env.FRONTEND_URL}/tutors`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Full Name',
+              description: fullName
+            },
+            {
+              item: 'Email Address',
+              description: email
+            },
+            {
+              item: 'Location',
+              description: location
+            },
+            {
+              item: 'Account Type',
+              description: 'Student'
+            }
+          ]
+        },
+        outro: [
+          'What you can do now:',
+          '• Browse and search for qualified tutors',
+          '• Book lessons with your preferred tutors',
+          '• Rate and review your learning experiences',
+          '• Track your learning progress',
+          '',
+          'Happy learning! 📚'
+        ]
+      }
+    });
+  }
+
+  // Login success notification
+  static generateLoginEmail(userData) {
+    const { fullName, email, lastLogin } = userData;
+    const loginTime = new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'You have successfully signed in to your TUTOR student account.',
+        action: {
+          instructions: 'Continue your learning journey or book a new lesson.',
+          button: {
+            color: '#22BC66',
+            text: 'Go to Dashboard',
+            link: `${process.env.FRONTEND_URL}/dashboard`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Login Time',
+              description: loginTime
+            },
+            {
+              item: 'Account Type',
+              description: '🎓 Student Account'
+            },
+            {
+              item: 'Email',
+              description: email
+            },
+            {
+              item: 'Previous Login',
+              description: lastLogin ? new Date(lastLogin).toLocaleString() : 'First time login'
+            }
+          ]
+        },
+        outro: [
+          'Security Notice: If this wasn\'t you, please secure your account immediately.',
+          '',
+          'Keep learning! 📖'
+        ]
+      }
+    });
+  }
+
+  // Booking confirmation email
+  static generateBookingConfirmationEmail(userData, bookingData) {
+    const { fullName } = userData;
+    const { tutorName, subject, scheduledDate, duration, totalAmount, status } = bookingData;
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Your booking has been created successfully! 📅',
+        action: {
+          instructions: 'View your booking details and prepare for your lesson.',
+          button: {
+            color: '#22BC66',
+            text: 'View Booking Details',
+            link: `${process.env.FRONTEND_URL}/bookings/${bookingData.id}`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Tutor',
+              description: tutorName || 'Loading...'
+            },
+            {
+              item: 'Subject',
+              description: subject
+            },
+            {
+              item: 'Date & Time',
+              description: new Date(scheduledDate).toLocaleString()
+            },
+            {
+              item: 'Duration',
+              description: `${duration} ${duration === 1 ? 'hour' : 'hours'}`
+            },
+            {
+              item: 'Total Amount',
+              description: `$${totalAmount}`
+            },
+            {
+              item: 'Status',
+              description: status === 'pending' ? '⏳ Waiting for tutor confirmation' : `✅ ${status}`
+            }
+          ]
+        },
+        outro: [
+          status === 'pending' 
+            ? 'Your tutor will confirm this booking soon. You\'ll receive another email once confirmed.'
+            : 'Your lesson is confirmed! Don\'t forget to prepare any questions you might have.',
+          '',
+          'Good luck with your learning! 🌟'
+        ]
+      }
+    });
+  }
+
+  // Password update success email
+  static generatePasswordUpdateEmail(userData) {
+    const { fullName, email } = userData;
+    const updateTime = new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Your TUTOR account password has been successfully updated.',
+        action: {
+          instructions: 'If this wasn\'t you, please contact support immediately.',
+          button: {
+            color: '#DC4C64',
+            text: 'Contact Support',
+            link: `${process.env.FRONTEND_URL}/support`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Account Email',
+              description: email
+            },
+            {
+              item: 'Password Updated',
+              description: updateTime
+            },
+            {
+              item: 'Account Type',
+              description: '🎓 Student Account'
+            },
+            {
+              item: 'Security Status',
+              description: '🔒 Password successfully changed'
+            }
+          ]
+        },
+        outro: [
+          'Security Tips:',
+          '• Use a strong, unique password',
+          '• Don\'t share your login credentials',
+          '• Log out from shared devices',
+          '',
+          'Your account security is important to us!'
+        ]
+      }
+    });
+  }
+
+  // Profile update confirmation email
+  static generateProfileUpdateEmail(userData) {
+    const { fullName, email } = userData;
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Your TUTOR student profile has been successfully updated.',
+        action: {
+          instructions: 'View your updated profile and continue learning.',
+          button: {
+            color: '#22BC66',
+            text: 'View Profile',
+            link: `${process.env.FRONTEND_URL}/profile`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Profile Status',
+              description: '✅ Successfully Updated'
+            },
+            {
+              item: 'Last Updated',
+              description: new Date().toLocaleString()
+            },
+            {
+              item: 'Account Type',
+              description: '🎓 Student Profile'
+            }
+          ]
+        },
+        outro: [
+          'Keep your profile updated for a better learning experience!',
+          '',
+          'Happy learning! 📚'
+        ]
+      }
+    });
+  }
+
+  // Rating submitted confirmation email
+  static generateRatingSubmittedEmail(userData, ratingData) {
+    const { fullName } = userData;
+    const { tutorName, rating, subject } = ratingData;
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Thank you for rating your tutor! Your feedback helps improve our community.',
+        action: {
+          instructions: 'Continue learning with more amazing tutors.',
+          button: {
+            color: '#22BC66',
+            text: 'Find More Tutors',
+            link: `${process.env.FRONTEND_URL}/tutors`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Tutor Rated',
+              description: tutorName
+            },
+            {
+              item: 'Subject',
+              description: subject
+            },
+            {
+              item: 'Your Rating',
+              description: `${'⭐'.repeat(rating)} (${rating}/5)`
+            },
+            {
+              item: 'Submitted',
+              description: new Date().toLocaleString()
+            }
+          ]
+        },
+        outro: [
+          'Your feedback helps other students make informed decisions.',
+          'Thank you for being part of our learning community! 🌟'
+        ]
+      }
+    });
+  }
+
+  // Booking cancellation email
+  static generateBookingCancellationEmail(userData, bookingData) {
+    const { fullName } = userData;
+    const { tutorName, subject, scheduledDate, reason } = bookingData;
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Your booking has been cancelled successfully.',
+        action: {
+          instructions: 'Book another lesson when you\'re ready to continue learning.',
+          button: {
+            color: '#22BC66',
+            text: 'Find New Tutors',
+            link: `${process.env.FRONTEND_URL}/tutors`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Cancelled Lesson',
+              description: `${subject} with ${tutorName}`
+            },
+            {
+              item: 'Original Date',
+              description: new Date(scheduledDate).toLocaleString()
+            },
+            {
+              item: 'Cancellation Reason',
+              description: reason || 'Not specified'
+            },
+            {
+              item: 'Cancelled On',
+              description: new Date().toLocaleString()
+            }
+          ]
+        },
+        outro: [
+          'No worries! You can book another lesson anytime.',
+          'We\'re here to support your learning journey! 📚'
+        ]
+      }
+    });
+  }
+}
+
+// Email Service Class for Students
+class StudentEmailService {
+  
+  static async sendWelcomeEmail(userData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generateWelcomeEmail(userData);
+      
+      await mailTransport(
+        userData.email,
+        'Welcome to TUTOR - Start Your Learning Journey! 🎓',
+        htmlContent
+      );
+      
+      console.log(`Welcome email sent successfully to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send welcome email:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send login notification email
+  static async sendLoginNotification(userData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generateLoginEmail(userData);
+      
+      await mailTransport(
+        userData.email,
+        'TUTOR - Login Notification 🔐',
+        htmlContent
+      );
+      
+      console.log(`Login notification sent successfully to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send login notification:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send booking confirmation email
+  static async sendBookingConfirmation(userData, bookingData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generateBookingConfirmationEmail(userData, bookingData);
+      
+      await mailTransport(
+        userData.email,
+        'Booking Confirmed - TUTOR 📅',
+        htmlContent
+      );
+      
+      console.log(`Booking confirmation sent to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send booking confirmation:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send password update notification
+  static async sendPasswordUpdateNotification(userData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generatePasswordUpdateEmail(userData);
+      
+      await mailTransport(
+        userData.email,
+        'TUTOR - Password Updated Successfully 🔒',
+        htmlContent
+      );
+      
+      console.log(`Password update notification sent to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send password update notification:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send profile update notification
+  static async sendProfileUpdateNotification(userData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generateProfileUpdateEmail(userData);
+      
+      await mailTransport(
+        userData.email,
+        'TUTOR - Profile Updated Successfully ✅',
+        htmlContent
+      );
+      
+      console.log(`Profile update notification sent to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send profile update notification:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send rating submitted confirmation
+  static async sendRatingConfirmation(userData, ratingData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generateRatingSubmittedEmail(userData, ratingData);
+      
+      await mailTransport(
+        userData.email,
+        'Thank You for Your Rating - TUTOR ⭐',
+        htmlContent
+      );
+      
+      console.log(`Rating confirmation sent to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send rating confirmation:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send booking cancellation confirmation
+  static async sendCancellationConfirmation(userData, bookingData) {
+    try {
+      const htmlContent = StudentEmailTemplates.generateBookingCancellationEmail(userData, bookingData);
+      
+      await mailTransport(
+        userData.email,
+        'Booking Cancelled - TUTOR 📅',
+        htmlContent
+      );
+      
+      console.log(`Cancellation confirmation sent to ${userData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send cancellation confirmation:', error);
+      return { success: false, error: error.message };
+    }
+  }
+}
+
 export const signup = async (req, res) => {
   try {
-    const { fullName, email, password, confirmPassword, location } = req.body;
+    const { fullName, email, password, confirmPassword } = req.body;
 
-    if (!fullName || !email || !password || !confirmPassword || !location) {
+    if (!fullName || !email || !password || !confirmPassword) {
       return res.status(400).json({
         status: 'error',
         message: 'All fields are required',
@@ -46,7 +538,6 @@ export const signup = async (req, res) => {
       fullName,
       email,
       password: hashedPassword,
-      location,
     });
 
     await newUser.save();
@@ -58,9 +549,24 @@ export const signup = async (req, res) => {
       { expiresIn: '24h' }
     );
 
+    // Send welcome email
+    try {
+      const emailResult = await StudentEmailService.sendWelcomeEmail({
+        fullName,
+        email,
+      });
+      
+      if (!emailResult.success) {
+        console.error('Welcome email failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+      // Don't fail the registration if email fails
+    }
+
     res.status(201).json({
       status: 'success',
-      message: 'User registered successfully',
+      message: 'User registered successfully. A welcome email has been sent!',
       data: {
         user: newUser,
         token
@@ -114,6 +620,26 @@ export const signin = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
+
+    // Send login notification email
+    try {
+      const emailResult = await StudentEmailService.sendLoginNotification({
+        fullName: user.fullName,
+        email: user.email,
+        lastLogin: user.lastLogin
+      });
+      
+      if (!emailResult.success) {
+        console.error('Login notification failed:', emailResult.error);
+      }
+      
+      // Update last login time
+      user.lastLogin = new Date();
+      await user.save();
+    } catch (emailError) {
+      console.error('Failed to send login notification email:', emailError);
+      // Don't fail the login if email fails
+    }
 
     res.status(200).json({
       status: 'success',
@@ -172,9 +698,24 @@ export const updatePassword = async (req, res) => {
     user.password = hashedNewPassword;
     await user.save();
 
+    // Send password update notification
+    try {
+      const emailResult = await StudentEmailService.sendPasswordUpdateNotification({
+        fullName: user.fullName,
+        email: user.email
+      });
+      
+      if (!emailResult.success) {
+        console.error('Password update notification failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send password update notification:', emailError);
+      // Don't fail the password update if email fails
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Password updated successfully',
+      message: 'Password updated successfully. A confirmation email has been sent.',
     });
   } catch (error) {
     res.status(500).json({
@@ -238,9 +779,24 @@ export const updateProfile = async (req, res) => {
 
     await user.save();
 
+    // Send profile update notification
+    try {
+      const emailResult = await StudentEmailService.sendProfileUpdateNotification({
+        fullName: user.fullName,
+        email: user.email
+      });
+      
+      if (!emailResult.success) {
+        console.error('Profile update notification failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send profile update notification:', emailError);
+      // Don't fail the profile update if email fails
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Profile updated successfully',
+      message: 'Profile updated successfully. A confirmation email has been sent.',
       data: user,
     });
   } catch (error) {
@@ -252,7 +808,7 @@ export const updateProfile = async (req, res) => {
   }
 };
 
-// NEW BOOKING FUNCTIONS
+// BOOKING FUNCTIONS
 
 export const createBooking = async (req, res) => {
   try {
@@ -335,9 +891,34 @@ export const createBooking = async (req, res) => {
     // Populate tutor details for response
     await newBooking.populate('tutorId', 'fullName email subjects hourlyRate');
 
+    // Get user for email
+    const user = await User.findById(id);
+
+    // Send booking confirmation email
+    try {
+      const emailResult = await StudentEmailService.sendBookingConfirmation(
+        { fullName: user.fullName, email: user.email },
+        {
+          id: newBooking._id,
+          tutorName: tutor.fullName,
+          subject,
+          scheduledDate: startTime,
+          duration,
+          totalAmount,
+          status: 'pending'
+        }
+      );
+      
+      if (!emailResult.success) {
+        console.error('Booking confirmation email failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send booking confirmation email:', emailError);
+    }
+
     res.status(201).json({
       status: 'success',
-      message: 'Booking created successfully. Waiting for tutor confirmation.',
+      message: 'Booking created successfully. Waiting for tutor confirmation. A confirmation email has been sent.',
       data: newBooking
     });
   } catch (error) {
@@ -398,7 +979,8 @@ export const cancelBooking = async (req, res) => {
     const { bookingId } = req.params;
     const { reason } = req.body;
 
-    const booking = await Booking.findOne({ _id: bookingId, studentId: id });
+    const booking = await Booking.findOne({ _id: bookingId, studentId: id })
+      .populate('tutorId', 'fullName');
     if (!booking) {
       return res.status(404).json({
         status: 'error',
@@ -429,9 +1011,31 @@ export const cancelBooking = async (req, res) => {
 
     await booking.save();
 
+    // Get user for email
+    const user = await User.findById(id);
+
+    // Send cancellation confirmation email
+    try {
+      const emailResult = await StudentEmailService.sendCancellationConfirmation(
+        { fullName: user.fullName, email: user.email },
+        {
+          tutorName: booking.tutorId?.fullName || 'Unknown',
+          subject: booking.subject,
+          scheduledDate: booking.scheduledDate,
+          reason
+        }
+      );
+      
+      if (!emailResult.success) {
+        console.error('Cancellation confirmation email failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send cancellation confirmation email:', emailError);
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Booking cancelled successfully',
+      message: 'Booking cancelled successfully. A confirmation email has been sent.',
       data: booking
     });
   } catch (error) {
@@ -501,16 +1105,37 @@ export const rateTutor = async (req, res) => {
     const tutorRatings = await Rating.find({ tutorId });
     const averageRating = tutorRatings.reduce((sum, r) => sum + r.rating, 0) / tutorRatings.length;
     
-    await Tutor.findByIdAndUpdate(tutorId, {
+    const tutor = await Tutor.findByIdAndUpdate(tutorId, {
       averageRating: parseFloat(averageRating.toFixed(1)),
       totalRatings: tutorRatings.length
     });
 
     await newRating.populate('tutorId', 'fullName');
 
+    // Get user for email
+    const user = await User.findById(id);
+
+    // Send rating confirmation email
+    try {
+      const emailResult = await StudentEmailService.sendRatingConfirmation(
+        { fullName: user.fullName, email: user.email },
+        {
+          tutorName: tutor.fullName,
+          rating,
+          subject: booking.subject
+        }
+      );
+      
+      if (!emailResult.success) {
+        console.error('Rating confirmation email failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send rating confirmation email:', emailError);
+    }
+
     res.status(201).json({
       status: 'success',
-      message: 'Rating submitted successfully',
+      message: 'Rating submitted successfully. Thank you for your feedback!',
       data: newRating
     });
   } catch (error) {

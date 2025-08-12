@@ -3,8 +3,339 @@ import argon2 from 'argon2';
 import Tutor from '../models/tutor.model.js';
 import { Booking } from '../models/booking.model.js';
 import { Rating } from '../models/rating.model.js';
+import { mailTransport } from '../config/googleapis.js';
+import { mailGenerator } from '../config/mailgen.js';
 import dotenv from 'dotenv';
 dotenv.config();
+
+class EmailTemplates {
+  
+  static generateWelcomeEmail(tutorData) {
+    const { fullName, email, location, hourlyRate, experience, subjects } = tutorData;
+    
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: [
+          'Welcome to TUTOR! 🎉',
+          'Your tutor account has been successfully created and is now pending verification.'
+        ],
+        action: {
+          instructions: 'While we review your profile, you can explore your dashboard and complete your profile setup.',
+          button: {
+            color: '#22BC66',
+            text: 'Visit Your Dashboard',
+            link: `${process.env.FRONTEND_URL}/dashboard`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Full Name',
+              description: fullName
+            },
+            {
+              item: 'Email Address',
+              description: email
+            },
+            {
+              item: 'Teaching Location',
+              description: location
+            },
+            {
+              item: 'Hourly Rate',
+              description: `$${hourlyRate}/hour`
+            },
+            {
+              item: 'Experience',
+              description: `${experience} ${experience === 1 ? 'year' : 'years'}`
+            },
+            {
+              item: 'Subjects',
+              description: Array.isArray(subjects) ? subjects.join(', ') : subjects
+            }
+          ]
+        },
+        outro: [
+          'What happens next?',
+          '• Our team will review your profile within 24-48 hours',
+          '• You\'ll receive an email notification once approved',
+          '• Start receiving booking requests from students',
+          '',
+          'Thank you for joining our tutoring community!'
+        ]
+      }
+    });
+  }
+
+  // Login success notification
+  static generateLoginEmail(tutorData) {
+    const { fullName, email, isVerified, lastLogin } = tutorData;
+    const loginTime = new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'You have successfully signed in to your TUTOR account.',
+        action: {
+          instructions: 'Access your dashboard to manage bookings and update your profile.',
+          button: {
+            color: '#22BC66',
+            text: 'Go to Dashboard',
+            link: `${process.env.FRONTEND_URL}/dashboard`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Login Time',
+              description: loginTime
+            },
+            {
+              item: 'Account Status',
+              description: isVerified ? '✅ Verified' : '⏳ Pending Verification'
+            },
+            {
+              item: 'Email',
+              description: email
+            },
+            {
+              item: 'Previous Login',
+              description: lastLogin ? new Date(lastLogin).toLocaleString() : 'First time login'
+            }
+          ]
+        },
+        outro: [
+          'Security Notice: If this wasn\'t you, please secure your account immediately.',
+          '',
+          'Happy tutoring! 📚'
+        ]
+      }
+    });
+  }
+
+  // Password update success email
+  static generatePasswordUpdateEmail(tutorData) {
+    const { fullName, email } = tutorData;
+    const updateTime = new Date().toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Your TUTOR account password has been successfully updated.',
+        action: {
+          instructions: 'If this wasn\'t you, please contact support immediately.',
+          button: {
+            color: '#DC4C64',
+            text: 'Contact Support',
+            link: `${process.env.FRONTEND_URL}/support`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Account Email',
+              description: email
+            },
+            {
+              item: 'Password Updated',
+              description: updateTime
+            },
+            {
+              item: 'Security Status',
+              description: '🔒 Password successfully changed'
+            }
+          ]
+        },
+        outro: [
+          'Security Tips:',
+          '• Use a strong, unique password',
+          '• Don\'t share your login credentials',
+          '• Log out from shared devices',
+          '',
+          'Your account security is important to us!'
+        ]
+      }
+    });
+  }
+
+  // Profile update confirmation email
+  static generateProfileUpdateEmail(tutorData) {
+    const { fullName, email } = tutorData;
+
+    return mailGenerator.generate({
+      body: {
+        name: fullName,
+        intro: 'Your TUTOR profile has been successfully updated.',
+        action: {
+          instructions: 'View your updated profile and manage your tutoring services.',
+          button: {
+            color: '#22BC66',
+            text: 'View Profile',
+            link: `${process.env.FRONTEND_URL}/profile`
+          }
+        },
+        table: {
+          data: [
+            {
+              item: 'Profile Status',
+              description: '✅ Successfully Updated'
+            },
+            {
+              item: 'Last Updated',
+              description: new Date().toLocaleString()
+            },
+            {
+              item: 'Visibility',
+              description: 'Your updated profile is now visible to students'
+            }
+          ]
+        },
+        outro: [
+          'Keep your profile updated to attract more students!',
+          '',
+          'Thank you for using TUTOR 📚'
+        ]
+      }
+    });
+  }
+}
+
+// Email Service Class
+class EmailService {
+  
+  // Send welcome email after successful signup
+  static async sendWelcomeEmail(tutorData) {
+    try {
+      const htmlContent = EmailTemplates.generateWelcomeEmail(tutorData);
+      
+      await mailTransport(
+        tutorData.email,
+        'Welcome to TUTOR - Account Created Successfully! 🎉',
+        htmlContent
+      );
+      
+      console.log(`Welcome email sent successfully to ${tutorData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send welcome email:', error);
+      
+      // Log specific error types for debugging
+      if (error.code === 'EAUTH') {
+        console.error('Authentication failed - check OAuth2 credentials');
+      } else if (error.code === 'ENOTFOUND') {
+        console.error('Network error - check internet connection');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error('Request timeout - Gmail service may be slow');
+      }
+      
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send login notification email with retry mechanism
+  static async sendLoginNotification(tutorData, retries = 2) {
+    try {
+      const htmlContent = EmailTemplates.generateLoginEmail(tutorData);
+      
+      await mailTransport(
+        tutorData.email,
+        'TUTOR - Login Notification 🔐',
+        htmlContent
+      );
+      
+      console.log(`Login notification sent successfully to ${tutorData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error(`Failed to send login notification (attempt ${3-retries}/3):`, error);
+      
+      // Retry logic for transient errors
+      if (retries > 0 && this.isRetryableError(error)) {
+        console.log(`Retrying in 2 seconds...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return this.sendLoginNotification(tutorData, retries - 1);
+      }
+      
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send password update notification
+  static async sendPasswordUpdateNotification(tutorData) {
+    try {
+      const htmlContent = EmailTemplates.generatePasswordUpdateEmail(tutorData);
+      
+      await mailTransport(
+        tutorData.email,
+        'TUTOR - Password Updated Successfully 🔒',
+        htmlContent
+      );
+      
+      console.log(`Password update notification sent to ${tutorData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send password update notification:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Send profile update notification
+  static async sendProfileUpdateNotification(tutorData) {
+    try {
+      const htmlContent = EmailTemplates.generateProfileUpdateEmail(tutorData);
+      
+      await mailTransport(
+        tutorData.email,
+        'TUTOR - Profile Updated Successfully ✅',
+        htmlContent
+      );
+      
+      console.log(`Profile update notification sent to ${tutorData.email}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send profile update notification:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Helper method to determine if error is retryable
+  static isRetryableError(error) {
+    const retryableErrors = ['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN'];
+    return retryableErrors.includes(error.code) || error.message.includes('timeout');
+  }
+
+  // Test email connection
+  static async testConnection() {
+    try {
+      // This assumes you're using the OAuth2 version
+      const transport = await createMailTransport();
+      await transport.verify();
+      console.log('Email service connection verified successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('Email service connection failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+}
+
+export { EmailService };
 
 export const signup = async (req, res) => {
   try {
@@ -91,9 +422,28 @@ export const signup = async (req, res) => {
       { expiresIn: '24h' }
     );
 
+    // Send welcome email
+    try {
+      const emailResult = await EmailService.sendWelcomeEmail({
+        fullName,
+        email,
+        location,
+        hourlyRate,
+        experience,
+        subjects
+      });
+      
+      if (!emailResult.success) {
+        console.error('Welcome email failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+      // Don't fail the registration if email fails
+    }
+
     res.status(201).json({
       status: 'success',
-      message: 'Tutor registered successfully. Your account is pending verification.',
+      message: 'Tutor registered successfully. Your account is pending verification. A welcome email has been sent.',
       data: {
         tutor: newTutor,
         token
@@ -147,6 +497,27 @@ export const signin = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
+
+    // Send login notification email
+    try {
+      const emailResult = await EmailService.sendLoginNotification({
+        fullName: tutor.fullName,
+        email: tutor.email,
+        isVerified: tutor.isVerified || false,
+        lastLogin: tutor.lastLogin
+      });
+      
+      if (!emailResult.success) {
+        console.error('Login notification failed:', emailResult.error);
+      }
+      
+      // Update last login time
+      tutor.lastLogin = new Date();
+      await tutor.save();
+    } catch (emailError) {
+      console.error('Failed to send login notification email:', emailError);
+      // Don't fail the login if email fails
+    }
 
     res.status(200).json({
       status: 'success',
@@ -205,9 +576,24 @@ export const updatePassword = async (req, res) => {
     tutor.password = hashedNewPassword;
     await tutor.save();
 
+    // Send password update notification
+    try {
+      const emailResult = await EmailService.sendPasswordUpdateNotification({
+        fullName: tutor.fullName,
+        email: tutor.email
+      });
+      
+      if (!emailResult.success) {
+        console.error('Password update notification failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send password update notification:', emailError);
+      // Don't fail the password update if email fails
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Password updated successfully',
+      message: 'Password updated successfully. A confirmation email has been sent.',
     });
   } catch (error) {
     res.status(500).json({
@@ -312,9 +698,24 @@ export const updateProfile = async (req, res) => {
 
     await tutor.save();
 
+    // Send profile update notification
+    try {
+      const emailResult = await EmailService.sendProfileUpdateNotification({
+        fullName: tutor.fullName,
+        email: tutor.email
+      });
+      
+      if (!emailResult.success) {
+        console.error('Profile update notification failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send profile update notification:', emailError);
+      // Don't fail the profile update if email fails
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Profile updated successfully',
+      message: 'Profile updated successfully. A confirmation email has been sent.',
       data: tutor,
     });
   } catch (error) {
@@ -403,7 +804,7 @@ export const getTutorById = async (req, res) => {
   }
 };
 
-// NEW DASHBOARD FUNCTIONS
+// DASHBOARD FUNCTIONS
 
 export const getDashboardStats = async (req, res) => {
   try {
