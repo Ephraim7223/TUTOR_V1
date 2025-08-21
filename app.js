@@ -51,7 +51,7 @@ const startServer  = async () => {
    const PORT  = process.env.PORT || 2345
    connectDB()
    try {
-      app.listen(PORT,() => {console.log(`J-SQUAD IS RUNNING ON PORT: ${PORT}`);})
+      app.listen(PORT,() => {console.log(`TUTOR_V1 IS RUNNING ON PORT: ${PORT}`);})
    } catch (error) {
       console.log(error);
    }
