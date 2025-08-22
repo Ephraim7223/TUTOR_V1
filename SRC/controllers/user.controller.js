@@ -995,14 +995,14 @@ export const cancelBooking = async (req, res) => {
       });
     }
 
-    // Check cancellation policy (e.g., 24 hours before)
-    const hoursBefore = (new Date(booking.scheduledDate) - new Date()) / (1000 * 60 * 60);
-    if (hoursBefore < 24) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Bookings can only be cancelled 24 hours before the scheduled time',
-      });
-    }
+    // // Check cancellation policy (e.g., 24 hours before)
+    // const hoursBefore = (new Date(booking.scheduledDate) - new Date()) / (1000 * 60 * 60);
+    // if (hoursBefore < 24) {
+    //   return res.status(400).json({
+    //     status: 'error',
+    //     message: 'Bookings can only be cancelled 24 hours before the scheduled time',
+    //   });
+    // }
 
     booking.status = 'cancelled';
     booking.cancellationReason = reason;
