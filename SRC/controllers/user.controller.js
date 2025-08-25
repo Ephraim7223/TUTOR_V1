@@ -1053,6 +1053,81 @@ export const getUserBookings = async (req, res) => {
   }
 };
 
+export const cancelBooking = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { bookingId } = req.params;
+    const { reason } = req.body;
+
+    const booking = await Booking.findOne({ _id: bookingId, studentId: id })
+      .populate('tutorId', 'fullName');
+    if (!booking) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Booking not found',
+      });
+    }
+
+    if (booking.status === 'cancelled' || booking.status === 'completed') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot cancel this booking',
+      });
+    }
+
+    // // Check cancellation policy (e.g., 24 hours before)
+    // const hoursBefore = (new Date(booking.scheduledDate) - new Date()) / (1000 * 60 * 60);
+    // if (hoursBefore < 24) {
+    //   return res.status(400).json({
+    //     status: 'error',
+    //     message: 'Bookings can only be cancelled 24 hours before the scheduled time',
+    //   });
+    // }
+
+    booking.status = 'cancelled';
+    booking.cancellationReason = reason;
+    booking.cancelledBy = 'student';
+    booking.cancelledAt = new Date();
+
+    await booking.save();
+
+    // Get user for email
+    const user = await User.findById(id);
+
+    // Send cancellation confirmation email
+    try {
+      const emailResult = await StudentEmailService.sendCancellationConfirmation(
+        { fullName: user.fullName, email: user.email },
+        {
+          tutorName: booking.tutorId?.fullName || 'Unknown',
+          subject: booking.subject,
+          scheduledDate: booking.scheduledDate,
+          reason
+        }
+      );
+      
+      if (!emailResult.success) {
+        console.error('Cancellation confirmation email failed:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('Failed to send cancellation confirmation email:', emailError);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Booking cancelled successfully. A confirmation email has been sent.',
+      data: booking
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while cancelling the booking',
+      error: error.message,
+    });
+  }
+};
+
+
 // Fixed rateTutor function  
 export const rateTutor = async (req, res) => {
   try {
