@@ -1095,3 +1095,298 @@ export const getEarningsReport = async (req, res) => {
     });
   }
 };
+
+// Add these functions to your tutor.controller.js file
+
+// Import mongoose at the top if not already imported
+import mongoose from 'mongoose';
+
+// ==== COURSE/LESSON COMPLETION FUNCTIONS ====
+
+export const markLessonCompleted = async (req, res) => {
+  try {
+    const { id } = req.user; // Tutor ID from auth middleware
+    const { bookingId } = req.params;
+    const { lessonNotes, nextSteps, studentProgress } = req.body;
+
+    // Validate bookingId format
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid booking ID format',
+      });
+    }
+
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+    const bookingObjectId = new mongoose.Types.ObjectId(bookingId);
+
+    // Find the booking and verify it belongs to this tutor
+    const booking = await Booking.findOne({
+      _id: bookingObjectId,
+      tutorId: tutorObjectId
+    }).populate('studentId', 'fullName email');
+
+    if (!booking) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Booking not found or you are not authorized to access it',
+      });
+    }
+
+    // Check if booking is in a state that can be completed
+    if (booking.status !== 'confirmed') {
+      return res.status(400).json({
+        status: 'error',
+        message: `Cannot complete lesson. Current status: ${booking.status}. Only confirmed lessons can be marked as completed.`,
+      });
+    }
+
+    // Check if lesson time has passed (optional validation)
+    const now = new Date();
+    const lessonEndTime = new Date(booking.endTime || booking.scheduledDate);
+    
+    if (now < lessonEndTime) {
+      // Optional: Allow tutors to complete lessons early, or uncomment below to prevent early completion
+      // return res.status(400).json({
+      //   status: 'error',
+      //   message: 'Cannot complete lesson before the scheduled end time',
+      // });
+    }
+
+    // Update booking status to completed
+    booking.status = 'completed';
+    booking.completedAt = new Date();
+    booking.lessonNotes = lessonNotes || '';
+    booking.nextSteps = nextSteps || '';
+    booking.studentProgress = studentProgress || '';
+
+    await booking.save();
+
+    // Send completion notification email to student (optional)
+    try {
+      if (booking.studentId && booking.studentId.email) {
+        const completionEmailResult = await StudentEmailService.sendLessonCompletionNotification(
+          {
+            fullName: booking.studentId.fullName,
+            email: booking.studentId.email
+          },
+          {
+            tutorName: (await Tutor.findById(id)).fullName,
+            subject: booking.subject,
+            lessonDate: booking.scheduledDate,
+            duration: booking.duration,
+            lessonNotes,
+            nextSteps,
+            bookingId: booking._id
+          }
+        );
+
+        if (!completionEmailResult.success) {
+          console.error('Lesson completion email failed:', completionEmailResult.error);
+        }
+      }
+    } catch (emailError) {
+      console.error('Failed to send lesson completion email:', emailError);
+      // Don't fail the completion if email fails
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Lesson marked as completed successfully. Student can now rate this lesson.',
+      data: {
+        booking,
+        canBeRated: true,
+        completedAt: booking.completedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Mark lesson completed error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while marking lesson as completed',
+      error: error.message,
+    });
+  }
+};
+
+export const getCompletableLessons = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { page = 1, limit = 10 } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    // Get confirmed lessons that haven't been completed yet
+    const completableLessons = await Booking.find({
+      tutorId: tutorObjectId,
+      status: 'confirmed',
+      // Optionally filter for lessons that should have ended by now
+      endTime: { $lte: new Date() }
+    })
+    .populate('studentId', 'fullName email')
+    .sort({ scheduledDate: -1 })
+    .limit(limit * 1)
+    .skip((page - 1) * limit);
+
+    const total = await Booking.countDocuments({
+      tutorId: tutorObjectId,
+      status: 'confirmed',
+      endTime: { $lte: new Date() }
+    });
+
+    const formattedLessons = completableLessons.map(lesson => ({
+      id: lesson._id,
+      student: lesson.studentId?.fullName || 'Unknown',
+      studentEmail: lesson.studentId?.email,
+      subject: lesson.subject,
+      scheduledDate: lesson.scheduledDate,
+      endTime: lesson.endTime,
+      duration: lesson.duration,
+      totalAmount: lesson.totalAmount,
+      status: lesson.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        lessons: formattedLessons,
+        totalPages: Math.ceil(total / limit),
+        currentPage: parseInt(page),
+        total
+      }
+    });
+
+  } catch (error) {
+    console.error('Get completable lessons error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving completable lessons',
+      error: error.message,
+    });
+  }
+};
+
+export const getCompletedLessons = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { page = 1, limit = 10, startDate, endDate } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    const query = {
+      tutorId: tutorObjectId,
+      status: 'completed'
+    };
+
+    // Add date filters if provided
+    if (startDate || endDate) {
+      query.completedAt = {};
+      if (startDate) query.completedAt.$gte = new Date(startDate);
+      if (endDate) query.completedAt.$lte = new Date(endDate);
+    }
+
+    const completedLessons = await Booking.find(query)
+      .populate('studentId', 'fullName email')
+      .sort({ completedAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Booking.countDocuments(query);
+
+    // Check if each completed lesson has been rated
+    const lessonsWithRatingStatus = await Promise.all(
+      completedLessons.map(async (lesson) => {
+        const rating = await Rating.findOne({
+          bookingId: lesson._id,
+          tutorId: tutorObjectId,
+          studentId: lesson.studentId._id
+        });
+
+        return {
+          ...lesson.toObject(),
+          hasBeenRated: !!rating,
+          rating: rating ? {
+            rating: rating.rating,
+            comment: rating.comment,
+            createdAt: rating.createdAt
+          } : null
+        };
+      })
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        lessons: lessonsWithRatingStatus,
+        totalPages: Math.ceil(total / limit),
+        currentPage: parseInt(page),
+        total
+      }
+    });
+
+  } catch (error) {
+    console.error('Get completed lessons error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving completed lessons',
+      error: error.message,
+    });
+  }
+};
+
+export const updateLessonNotes = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { bookingId } = req.params;
+    const { lessonNotes, nextSteps, studentProgress } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid booking ID format',
+      });
+    }
+
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+    const bookingObjectId = new mongoose.Types.ObjectId(bookingId);
+
+    const booking = await Booking.findOne({
+      _id: bookingObjectId,
+      tutorId: tutorObjectId,
+      status: 'completed'
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Completed lesson not found or you are not authorized to access it',
+      });
+    }
+
+    // Update lesson notes
+    booking.lessonNotes = lessonNotes || booking.lessonNotes;
+    booking.nextSteps = nextSteps || booking.nextSteps;
+    booking.studentProgress = studentProgress || booking.studentProgress;
+    booking.notesUpdatedAt = new Date();
+
+    await booking.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Lesson notes updated successfully',
+      data: {
+        lessonNotes: booking.lessonNotes,
+        nextSteps: booking.nextSteps,
+        studentProgress: booking.studentProgress,
+        notesUpdatedAt: booking.notesUpdatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Update lesson notes error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while updating lesson notes',
+      error: error.message,
+    });
+  }
+};

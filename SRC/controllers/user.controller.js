@@ -64,6 +64,76 @@ class StudentEmailTemplates {
     });
   }
 
+  static generateLessonCompletionEmail(userData, lessonData) {
+  const { fullName } = userData;
+  const { tutorName, subject, lessonDate, duration, lessonNotes, nextSteps, bookingId } = lessonData;
+
+  return mailGenerator.generate({
+    body: {
+      name: fullName,
+      intro: `Your ${subject} lesson with ${tutorName} has been completed! 🎓`,
+      action: {
+        instructions: 'Rate your learning experience to help other students.',
+        button: {
+          color: '#22BC66',
+          text: 'Rate This Lesson',
+          link: `${process.env.FRONTEND_URL}/rate-lesson/${bookingId}`
+        }
+      },
+      table: {
+        data: [
+          {
+            item: 'Tutor',
+            description: tutorName
+          },
+          {
+            item: 'Subject',
+            description: subject
+          },
+          {
+            item: 'Lesson Date',
+            description: new Date(lessonDate).toLocaleString()
+          },
+          {
+            item: 'Duration',
+            description: `${duration} ${duration === 1 ? 'hour' : 'hours'}`
+          },
+          ...(lessonNotes ? [{
+            item: 'Lesson Notes',
+            description: lessonNotes
+          }] : []),
+          ...(nextSteps ? [{
+            item: 'Next Steps',
+            description: nextSteps
+          }] : [])
+        ]
+      },
+      outro: [
+        'Your feedback helps improve our tutoring community.',
+        'Keep up the great learning! 📚'
+      ]
+    }
+  });
+}
+
+static async sendLessonCompletionNotification(userData, lessonData) {
+  try {
+    const htmlContent = StudentEmailTemplates.generateLessonCompletionEmail(userData, lessonData);
+    
+    await mailTransport(
+      userData.email,
+      'Lesson Completed - Please Rate Your Experience! 🎓',
+      htmlContent
+    );
+    
+    console.log(`Lesson completion notification sent to ${userData.email}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to send lesson completion notification:', error);
+    return { success: false, error: error.message };
+  }
+}
+
   // Login success notification
   static generateLoginEmail(userData) {
     const { fullName, email, lastLogin } = userData;

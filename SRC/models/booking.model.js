@@ -1,3 +1,5 @@
+// Update your booking.model.js to include these additional fields for lesson completion
+
 import mongoose from 'mongoose';
 
 const bookingSchema = new mongoose.Schema({
@@ -109,6 +111,31 @@ const bookingSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  // New fields for lesson completion
+  completedAt: {
+    type: Date
+  },
+  lessonNotes: {
+    type: String,
+    trim: true,
+    maxlength: 1000,
+    default: ''
+  },
+  nextSteps: {
+    type: String,
+    trim: true,
+    maxlength: 500,
+    default: ''
+  },
+  studentProgress: {
+    type: String,
+    trim: true,
+    maxlength: 500,
+    default: ''
+  },
+  notesUpdatedAt: {
+    type: Date
   }
 }, {
   timestamps: true
@@ -120,6 +147,19 @@ bookingSchema.index({ studentId: 1, scheduledDate: 1 });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ scheduledDate: 1 });
 bookingSchema.index({ paymentStatus: 1 });
+// Additional indexes for completion features
+bookingSchema.index({ tutorId: 1, status: 1 });
+bookingSchema.index({ status: 1, endTime: 1 });
+
+// Virtual for checking if lesson can be completed
+bookingSchema.virtual('canBeCompleted').get(function() {
+  return this.status === 'confirmed' && new Date() >= this.endTime;
+});
+
+// Virtual for checking if lesson can be rated
+bookingSchema.virtual('canBeRated').get(function() {
+  return this.status === 'completed';
+});
 
 // Pre-save middleware to handle calculations
 bookingSchema.pre('save', function(next) {
@@ -132,6 +172,11 @@ bookingSchema.pre('save', function(next) {
   if (this.isModified('scheduledDate') || this.isModified('duration')) {
     this.startTime = this.scheduledDate;
     this.endTime = new Date(this.scheduledDate.getTime() + (this.duration * 60 * 60 * 1000));
+  }
+  
+  // Set completion timestamp when status changes to completed
+  if (this.isModified('status') && this.status === 'completed' && !this.completedAt) {
+    this.completedAt = new Date();
   }
   
   next();

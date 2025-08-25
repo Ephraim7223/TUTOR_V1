@@ -13,7 +13,12 @@ import {
   getUpcomingLessons,
   getBookingHistory,
   updateAvailability,
-  getEarningsReport
+  getEarningsReport,
+  // Course completion functions
+  markLessonCompleted,
+  getCompletableLessons,
+  getCompletedLessons,
+  updateLessonNotes
 } from '../controllers/tutor.controller.js';
 import { authenticateToken } from '../middlewares/auth.middleware.js';
 
@@ -40,6 +45,12 @@ router.get('/dashboard/upcoming', getUpcomingLessons);
 
 // Booking management routes
 router.get('/bookings/all', getBookingHistory);
+
+// Course/Lesson completion routes
+router.post('/lessons/:bookingId/complete', markLessonCompleted);
+router.get('/lessons/completable', getCompletableLessons);
+router.get('/lessons/completed', getCompletedLessons);
+router.put('/lessons/:bookingId/notes', updateLessonNotes);
 
 // Availability management
 router.put('/availability/update', updateAvailability);
