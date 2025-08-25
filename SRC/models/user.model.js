@@ -18,25 +18,25 @@ const userSchema = new mongoose.Schema({
     required: true,
     minlength: 6
   },
-  // location: {
-  //   type: String,
-  //   required: true,
-  //   trim: true
-  // },
+  location: {
+    type: String,
+    trim: true
+  },
   role: {
     type: String,
-    default: 'user',
-    enum: ['user']
+    default: 'student',
+    enum: ['student']
   },
   isActive: {
     type: Boolean,
     default: true
   },
-  // Add the wishlist field to your schema
+  lastLogin: {
+    type: Date
+  },
   wishlist: [{
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Tutor',
-    default: []
+    ref: 'Tutor'
   }]
 }, {
   timestamps: true
@@ -49,5 +49,4 @@ userSchema.methods.toJSON = function() {
 };
 
 const User = mongoose.model('User', userSchema);
-
 export default User;

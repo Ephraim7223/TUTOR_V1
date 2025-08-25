@@ -838,8 +838,12 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // Check if tutor teaches the requested subject
-    if (!tutor.subjects.includes(subject)) {
+    // Check if tutor teaches the requested subject (case insensitive)
+    const teachesSubject = tutor.subjects.some(s => 
+      s.toLowerCase() === subject.toLowerCase()
+    );
+    
+    if (!teachesSubject) {
       return res.status(400).json({
         status: 'error',
         message: 'Tutor does not teach this subject',
@@ -851,14 +855,15 @@ export const createBooking = async (req, res) => {
     const startTime = new Date(scheduledDate);
     const endTime = new Date(startTime.getTime() + duration * 60 * 60 * 1000);
 
-    // Check for booking conflicts
+    // Fixed: Check for booking conflicts with proper date comparison
     const conflictingBooking = await Booking.findOne({
-      tutorId,
+      tutorId: new mongoose.Types.ObjectId(tutorId),
       $or: [
         {
-          // New booking starts during existing booking
-          startTime: { $lt: endTime },
-          endTime: { $gt: startTime }
+          $and: [
+            { startTime: { $lt: endTime } },
+            { endTime: { $gt: startTime } }
+          ]
         }
       ],
       status: { $in: ['pending', 'confirmed'] }
@@ -872,8 +877,8 @@ export const createBooking = async (req, res) => {
     }
 
     const newBooking = new Booking({
-      studentId: id,
-      tutorId,
+      studentId: new mongoose.Types.ObjectId(id),
+      tutorId: new mongoose.Types.ObjectId(tutorId),
       subject,
       scheduledDate: startTime,
       startTime: startTime,
@@ -888,8 +893,9 @@ export const createBooking = async (req, res) => {
 
     await newBooking.save();
 
-    // Populate tutor details for response
+    // Populate with proper field selection
     await newBooking.populate('tutorId', 'fullName email subjects hourlyRate');
+    await newBooking.populate('studentId', 'fullName email');
 
     // Get user for email
     const user = await User.findById(id);
@@ -922,6 +928,7 @@ export const createBooking = async (req, res) => {
       data: newBooking
     });
   } catch (error) {
+    console.error('Booking creation error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while creating the booking',
@@ -930,12 +937,13 @@ export const createBooking = async (req, res) => {
   }
 };
 
+// Fixed getUserBookings function
 export const getUserBookings = async (req, res) => {
   try {
     const { id } = req.user;
     const { page = 1, limit = 10, status, startDate, endDate } = req.query;
 
-    const query = { studentId: id };
+    const query = { studentId: new mongoose.Types.ObjectId(id) };
 
     // Add filters
     if (status) {
@@ -948,7 +956,8 @@ export const getUserBookings = async (req, res) => {
     }
 
     const bookings = await Booking.find(query)
-      .populate('tutorId', 'fullName email subjects hourlyRate location')
+      .populate('tutorId', 'fullName email subjects hourlyRate location averageRating')
+      .populate('studentId', 'fullName email')
       .sort({ scheduledDate: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -965,6 +974,7 @@ export const getUserBookings = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Get user bookings error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while retrieving bookings',
@@ -973,82 +983,7 @@ export const getUserBookings = async (req, res) => {
   }
 };
 
-export const cancelBooking = async (req, res) => {
-  try {
-    const { id } = req.user;
-    const { bookingId } = req.params;
-    const { reason } = req.body;
-
-    const booking = await Booking.findOne({ _id: bookingId, studentId: id })
-      .populate('tutorId', 'fullName');
-    if (!booking) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Booking not found',
-      });
-    }
-
-    if (booking.status === 'cancelled' || booking.status === 'completed') {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Cannot cancel this booking',
-      });
-    }
-
-    // // Check cancellation policy (e.g., 24 hours before)
-    // const hoursBefore = (new Date(booking.scheduledDate) - new Date()) / (1000 * 60 * 60);
-    // if (hoursBefore < 24) {
-    //   return res.status(400).json({
-    //     status: 'error',
-    //     message: 'Bookings can only be cancelled 24 hours before the scheduled time',
-    //   });
-    // }
-
-    booking.status = 'cancelled';
-    booking.cancellationReason = reason;
-    booking.cancelledBy = 'student';
-    booking.cancelledAt = new Date();
-
-    await booking.save();
-
-    // Get user for email
-    const user = await User.findById(id);
-
-    // Send cancellation confirmation email
-    try {
-      const emailResult = await StudentEmailService.sendCancellationConfirmation(
-        { fullName: user.fullName, email: user.email },
-        {
-          tutorName: booking.tutorId?.fullName || 'Unknown',
-          subject: booking.subject,
-          scheduledDate: booking.scheduledDate,
-          reason
-        }
-      );
-      
-      if (!emailResult.success) {
-        console.error('Cancellation confirmation email failed:', emailResult.error);
-      }
-    } catch (emailError) {
-      console.error('Failed to send cancellation confirmation email:', emailError);
-    }
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Booking cancelled successfully. A confirmation email has been sent.',
-      data: booking
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while cancelling the booking',
-      error: error.message,
-    });
-  }
-};
-
-// RATING FUNCTIONS
-
+// Fixed rateTutor function  
 export const rateTutor = async (req, res) => {
   try {
     const { id } = req.user;
@@ -1062,11 +997,15 @@ export const rateTutor = async (req, res) => {
       });
     }
 
+    const studentObjectId = new mongoose.Types.ObjectId(id);
+    const tutorObjectId = new mongoose.Types.ObjectId(tutorId);
+    const bookingObjectId = new mongoose.Types.ObjectId(bookingId);
+
     // Verify the booking exists and is completed
     const booking = await Booking.findOne({
-      _id: bookingId,
-      studentId: id,
-      tutorId,
+      _id: bookingObjectId,
+      studentId: studentObjectId,
+      tutorId: tutorObjectId,
       status: 'completed'
     });
 
@@ -1079,9 +1018,9 @@ export const rateTutor = async (req, res) => {
 
     // Check if already rated
     const existingRating = await Rating.findOne({
-      studentId: id,
-      tutorId,
-      bookingId
+      studentId: studentObjectId,
+      tutorId: tutorObjectId,
+      bookingId: bookingObjectId
     });
 
     if (existingRating) {
@@ -1092,9 +1031,9 @@ export const rateTutor = async (req, res) => {
     }
 
     const newRating = new Rating({
-      studentId: id,
-      tutorId,
-      bookingId,
+      studentId: studentObjectId,
+      tutorId: tutorObjectId,
+      bookingId: bookingObjectId,
       rating,
       comment
     });
@@ -1102,15 +1041,16 @@ export const rateTutor = async (req, res) => {
     await newRating.save();
 
     // Update tutor's average rating
-    const tutorRatings = await Rating.find({ tutorId });
+    const tutorRatings = await Rating.find({ tutorId: tutorObjectId });
     const averageRating = tutorRatings.reduce((sum, r) => sum + r.rating, 0) / tutorRatings.length;
     
-    const tutor = await Tutor.findByIdAndUpdate(tutorId, {
+    const tutor = await Tutor.findByIdAndUpdate(tutorObjectId, {
       averageRating: parseFloat(averageRating.toFixed(1)),
       totalRatings: tutorRatings.length
     });
 
     await newRating.populate('tutorId', 'fullName');
+    await newRating.populate('studentId', 'fullName');
 
     // Get user for email
     const user = await User.findById(id);
@@ -1139,6 +1079,7 @@ export const rateTutor = async (req, res) => {
       data: newRating
     });
   } catch (error) {
+    console.error('Rate tutor error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while submitting the rating',
@@ -1147,6 +1088,277 @@ export const rateTutor = async (req, res) => {
   }
 };
 
+// ==== TUTOR CONTROLLER FIXES ====
+
+// Fixed getDashboardStats function
+export const getDashboardStats = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+        
+    // Get total bookings count
+    const totalBookings = await Booking.countDocuments({ 
+      tutorId: tutorObjectId,
+      status: { $in: ['confirmed', 'completed'] }
+    });
+
+    // Get unique students count
+    const uniqueStudents = await Booking.distinct('studentId', { 
+      tutorId: tutorObjectId,
+      status: { $in: ['confirmed', 'completed'] }
+    });
+
+    // Calculate total earnings
+    const completedBookings = await Booking.find({ 
+      tutorId: tutorObjectId, 
+      status: 'completed' 
+    });
+    const totalEarnings = completedBookings.reduce((sum, booking) => {
+      return sum + (booking.totalAmount || 0);
+    }, 0);
+
+    // Get average rating
+    const ratings = await Rating.find({ tutorId: tutorObjectId });
+    const averageRating = ratings.length > 0 
+      ? ratings.reduce((sum, rating) => sum + rating.rating, 0) / ratings.length
+      : 0;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        totalBookings,
+        totalStudents: uniqueStudents.length,
+        totalEarnings: totalEarnings.toFixed(2),
+        averageRating: averageRating.toFixed(1),
+        totalRatings: ratings.length
+      }
+    });
+  } catch (error) {
+    console.error('Dashboard stats error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving dashboard stats',
+      error: error.message,
+    });
+  }
+};
+
+// Fixed getRecentActivity function
+export const getRecentActivity = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { limit = 10 } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    // Get recent bookings with student details
+    const recentBookings = await Booking.find({ tutorId: tutorObjectId })
+      .populate('studentId', 'fullName email')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    // Get recent ratings
+    const recentRatings = await Rating.find({ tutorId: tutorObjectId })
+      .populate('studentId', 'fullName')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    // Combine and sort by date
+    const activities = [
+      ...recentBookings.map(booking => ({
+        type: 'booking',
+        action: `New booking from ${booking.studentId?.fullName || 'Unknown'}`,
+        date: booking.createdAt,
+        status: booking.status,
+        amount: booking.totalAmount
+      })),
+      ...recentRatings.map(rating => ({
+        type: 'rating',
+        action: `Received ${rating.rating}-star rating from ${rating.studentId?.fullName || 'Unknown'}`,
+        date: rating.createdAt,
+        rating: rating.rating,
+        comment: rating.comment
+      }))
+    ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, parseInt(limit));
+
+    res.status(200).json({
+      status: 'success',
+      data: activities
+    });
+  } catch (error) {
+    console.error('Recent activity error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving recent activity',
+      error: error.message,
+    });
+  }
+};
+
+// Fixed getUpcomingLessons function
+export const getUpcomingLessons = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { limit = 10 } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    const now = new Date();
+    const upcomingLessons = await Booking.find({
+      tutorId: tutorObjectId,
+      status: 'confirmed',
+      scheduledDate: { $gte: now }
+    })
+    .populate('studentId', 'fullName email')
+    .sort({ scheduledDate: 1 })
+    .limit(parseInt(limit));
+
+    const formattedLessons = upcomingLessons.map(lesson => ({
+      id: lesson._id,
+      student: lesson.studentId?.fullName || 'Unknown',
+      studentEmail: lesson.studentId?.email,
+      subject: lesson.subject,
+      date: lesson.scheduledDate,
+      duration: lesson.duration,
+      amount: lesson.totalAmount,
+      meetingLink: lesson.meetingLink,
+      status: lesson.status
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: formattedLessons
+    });
+  } catch (error) {
+    console.error('Upcoming lessons error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving upcoming lessons',
+      error: error.message,
+    });
+  }
+};
+
+// Fixed getBookingHistory function
+export const getBookingHistory = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { page = 1, limit = 10, status, startDate, endDate } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    const query = { tutorId: tutorObjectId };
+
+    // Add filters
+    if (status) {
+      query.status = status;
+    }
+    if (startDate || endDate) {
+      query.scheduledDate = {};
+      if (startDate) query.scheduledDate.$gte = new Date(startDate);
+      if (endDate) query.scheduledDate.$lte = new Date(endDate);
+    }
+
+    const bookings = await Booking.find(query)
+      .populate('studentId', 'fullName email')
+      .sort({ scheduledDate: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Booking.countDocuments(query);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        bookings,
+        totalPages: Math.ceil(total / limit),
+        currentPage: parseInt(page),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Booking history error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving booking history',
+      error: error.message,
+    });
+  }
+};
+
+// Fixed getEarningsReport function
+export const getEarningsReport = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { startDate, endDate, groupBy = 'month' } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    const matchStage = {
+      tutorId: tutorObjectId,
+      status: 'completed'
+    };
+
+    if (startDate || endDate) {
+      matchStage.scheduledDate = {};
+      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
+      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
+    }
+
+    let groupStage;
+    if (groupBy === 'day') {
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 }
+        }
+      };
+    } else if (groupBy === 'week') {
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-W%V", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 }
+        }
+      };
+    } else { // month
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 }
+        }
+      };
+    }
+
+    const earnings = await Booking.aggregate([
+      { $match: matchStage },
+      groupStage,
+      { $sort: { _id: 1 } }
+    ]);
+
+    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
+    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        earnings,
+        summary: {
+          totalEarnings: totalEarnings.toFixed(2),
+          totalLessons,
+          averagePerLesson: totalLessons > 0 ? (totalEarnings / totalLessons).toFixed(2) : 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Earnings report error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while generating earnings report',
+      error: error.message,
+    });
+  }
+};
+
+// RATING FUNCTIONS
 export const getUserRatings = async (req, res) => {
   try {
     const { id } = req.user;

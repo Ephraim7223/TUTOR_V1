@@ -64,16 +64,28 @@ const tutorSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
-  rating: {
+  // Fixed: Changed from 'rating' to 'averageRating' to match controller
+  averageRating: {
     type: Number,
     default: 0,
     min: 0,
     max: 5
   },
-  totalReviews: {
+  // Fixed: Changed from 'totalReviews' to 'totalRatings' to match controller
+  totalRatings: {
     type: Number,
     default: 0
-  }
+  },
+  lastLogin: {
+    type: Date
+  },
+  // Added availability field used in controller
+  availability: [{
+    day: String,
+    startTime: String,
+    endTime: String,
+    isAvailable: Boolean
+  }]
 }, {
   timestamps: true
 });
@@ -85,5 +97,4 @@ tutorSchema.methods.toJSON = function() {
 };
 
 const Tutor = mongoose.model('Tutor', tutorSchema);
-
 export default Tutor;

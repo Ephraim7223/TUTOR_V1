@@ -6,7 +6,6 @@ const bookingSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  // Changed from 'tutor' to 'tutorId' to match controller
   tutorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tutor',
@@ -17,17 +16,17 @@ const bookingSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  // Changed from 'sessionDate' to 'scheduledDate' to match controller
   scheduledDate: {
     type: Date,
     required: true
   },
+  // Fixed: Changed to Date types to match controller logic
   startTime: {
-    type: String,
+    type: Date,
     required: true
   },
   endTime: {
-    type: String,
+    type: Date,
     required: true
   },
   duration: {
@@ -85,7 +84,6 @@ const bookingSchema = new mongoose.Schema({
     enum: ['pending', 'paid', 'refunded', 'failed'],
     default: 'pending'
   },
-  // Added cancellation fields from controller
   cancellationReason: {
     type: String,
     maxlength: 500
@@ -97,7 +95,6 @@ const bookingSchema = new mongoose.Schema({
   cancelledAt: {
     type: Date
   },
-  // Added rescheduling fields
   originalScheduledDate: {
     type: Date
   },
@@ -117,26 +114,28 @@ const bookingSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// Indexes for better query performance
 bookingSchema.index({ tutorId: 1, scheduledDate: 1 });
 bookingSchema.index({ studentId: 1, scheduledDate: 1 });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ scheduledDate: 1 });
 bookingSchema.index({ paymentStatus: 1 });
 
-bookingSchema.virtual('sessionEndTime').get(function() {
-  if (this.scheduledDate && this.duration) {
-    return new Date(this.scheduledDate.getTime() + (this.duration * 60 * 60 * 1000));
-  }
-  return null;
-});
-
+// Pre-save middleware to handle calculations
 bookingSchema.pre('save', function(next) {
+  // Calculate total amount
   if (this.isModified('duration') || this.isModified('hourlyRate')) {
     this.totalAmount = this.duration * this.hourlyRate;
   }
+  
+  // Set startTime and endTime based on scheduledDate and duration
+  if (this.isModified('scheduledDate') || this.isModified('duration')) {
+    this.startTime = this.scheduledDate;
+    this.endTime = new Date(this.scheduledDate.getTime() + (this.duration * 60 * 60 * 1000));
+  }
+  
   next();
 });
 
 const Booking = mongoose.model('Booking', bookingSchema);
-
 export { Booking };
