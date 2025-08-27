@@ -7,6 +7,7 @@ import { Rating } from '../models/rating.model.js';
 import { mailTransport } from '../config/googleapis.js';
 import { mailGenerator } from '../config/mailgen.js';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 dotenv.config();
 
 // Email Templates Class for Students
