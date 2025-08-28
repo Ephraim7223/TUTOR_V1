@@ -1134,12 +1134,12 @@ export const markLessonCompleted = async (req, res) => {
     }
 
     // Check if booking is in a state that can be completed
-    if (booking.status !== 'confirmed') {
-      return res.status(400).json({
-        status: 'error',
-        message: `Cannot complete lesson. Current status: ${booking.status}. Only confirmed lessons can be marked as completed.`,
-      });
-    }
+    // if (booking.status !== 'confirmed') {
+    //   return res.status(400).json({
+    //     status: 'error',
+    //     message: `Cannot complete lesson. Current status: ${booking.status}. Only confirmed lessons can be marked as completed.`,
+    //   });
+    // }
 
     // Check if lesson time has passed (optional validation)
     const now = new Date();
