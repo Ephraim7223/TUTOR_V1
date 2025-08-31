@@ -1009,50 +1009,6 @@ export const createBooking = async (req, res) => {
 };
 
 // Fixed getUserBookings function
-export const getUserBookings = async (req, res) => {
-  try {
-    const { id } = req.user;
-    const { page = 1, limit = 10, status, startDate, endDate } = req.query;
-
-    const query = { studentId: new mongoose.Types.ObjectId(id) };
-
-    // Add filters
-    if (status) {
-      query.status = status;
-    }
-    if (startDate || endDate) {
-      query.scheduledDate = {};
-      if (startDate) query.scheduledDate.$gte = new Date(startDate);
-      if (endDate) query.scheduledDate.$lte = new Date(endDate);
-    }
-
-    const bookings = await Booking.find(query)
-      .populate('tutorId', 'fullName email subjects hourlyRate location averageRating')
-      .populate('studentId', 'fullName email')
-      .sort({ scheduledDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Booking.countDocuments(query);
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        bookings,
-        totalPages: Math.ceil(total / limit),
-        currentPage: parseInt(page),
-        total
-      }
-    });
-  } catch (error) {
-    console.error('Get user bookings error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while retrieving bookings',
-      error: error.message,
-    });
-  }
-};
 
 export const cancelBooking = async (req, res) => {
   try {
@@ -1542,69 +1498,124 @@ export const getUserRatings = async (req, res) => {
 export const getUserDashboard = async (req, res) => {
   try {
     const { id } = req.user;
+    console.log('User ID from token:', id); // Debug log
+
+    // Convert to ObjectId for proper querying
+    const studentObjectId = new mongoose.Types.ObjectId(id);
 
     // Get total bookings
-    const totalBookings = await Booking.countDocuments({ studentId: id });
+    const totalBookings = await Booking.countDocuments({ 
+      studentId: studentObjectId 
+    });
+    console.log('Total bookings:', totalBookings); // Debug log
 
     // Get completed lessons
     const completedLessons = await Booking.countDocuments({ 
-      studentId: id, 
+      studentId: studentObjectId, 
       status: 'completed' 
     });
+    console.log('Completed lessons:', completedLessons); // Debug log
 
-    // Get total spent
-    const completedBookings = await Booking.find({ 
-      studentId: id, 
-      status: 'completed' 
-    });
-    const totalSpent = completedBookings.reduce((sum, booking) => {
-      return sum + (booking.totalAmount || 0);
-    }, 0);
+    // Get total spent - only from completed bookings
+    const completedBookingsAgg = await Booking.aggregate([
+      { 
+        $match: { 
+          studentId: studentObjectId, 
+          status: 'completed' 
+        } 
+      },
+      {
+        $group: {
+          _id: null,
+          totalSpent: { $sum: '$totalAmount' }
+        }
+      }
+    ]);
+    const totalSpent = completedBookingsAgg.length > 0 ? completedBookingsAgg[0].totalSpent : 0;
+    console.log('Total spent:', totalSpent); // Debug log
 
-    // Get favorite tutors (most booked)
+    // Get favorite tutors (most booked) - Fixed aggregation
     const tutorBookings = await Booking.aggregate([
-      { $match: { studentId: id, status: { $in: ['completed', 'confirmed'] } } },
-      { $group: { _id: '$tutorId', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
+      { 
+        $match: { 
+          studentId: studentObjectId, 
+          status: { $in: ['completed', 'confirmed'] } 
+        } 
+      },
+      { 
+        $group: { 
+          _id: '$tutorId', 
+          bookingCount: { $sum: 1 },
+          subjects: { $addToSet: '$subject' }
+        } 
+      },
+      { $sort: { bookingCount: -1 } },
       { $limit: 5 }
     ]);
 
+    console.log('Tutor bookings aggregation:', tutorBookings); // Debug log
+
+    // Get tutor details for favorite tutors
     const favoriteTutorIds = tutorBookings.map(tb => tb._id);
-    const favoriteTutors = await Tutor.find({ _id: { $in: favoriteTutorIds } })
-      .select('fullName subjects averageRating');
+    const favoriteTutors = await Tutor.find({ 
+      _id: { $in: favoriteTutorIds } 
+    }).select('fullName subjects averageRating totalRatings location');
+
+    // Merge booking counts with tutor details
+    const favoriteTutorsWithCounts = favoriteTutors.map(tutor => {
+      const bookingData = tutorBookings.find(tb => tb._id.toString() === tutor._id.toString());
+      return {
+        ...tutor.toObject(),
+        bookingCount: bookingData ? bookingData.bookingCount : 0,
+        subjectsStudied: bookingData ? bookingData.subjects : []
+      };
+    });
 
     // Get upcoming lessons
+    const now = new Date();
     const upcomingLessons = await Booking.find({
-      studentId: id,
+      studentId: studentObjectId,
       status: 'confirmed',
-      scheduledDate: { $gte: new Date() }
+      scheduledDate: { $gte: now }
     })
-    .populate('tutorId', 'fullName subjects')
+    .populate('tutorId', 'fullName subjects averageRating')
     .sort({ scheduledDate: 1 })
     .limit(5);
 
-    // Get recent activity
-    const recentBookings = await Booking.find({ studentId: id })
-      .populate('tutorId', 'fullName')
-      .sort({ createdAt: -1 })
-      .limit(5);
+    console.log('Upcoming lessons:', upcomingLessons.length); // Debug log
 
-    const recentRatings = await Rating.find({ studentId: id })
-      .populate('tutorId', 'fullName')
-      .sort({ createdAt: -1 })
-      .limit(5);
+    // Get recent activity - Fixed to use proper ObjectId
+    const recentBookings = await Booking.find({ 
+      studentId: studentObjectId 
+    })
+    .populate('tutorId', 'fullName')
+    .sort({ createdAt: -1 })
+    .limit(5);
+
+    const recentRatings = await Rating.find({ 
+      studentId: studentObjectId 
+    })
+    .populate('tutorId', 'fullName')
+    .populate('bookingId', 'subject')
+    .sort({ createdAt: -1 })
+    .limit(5);
+
+    console.log('Recent bookings:', recentBookings.length); // Debug log
+    console.log('Recent ratings:', recentRatings.length); // Debug log
 
     const recentActivity = [
       ...recentBookings.map(booking => ({
         type: 'booking',
-        action: `Booked lesson with ${booking.tutorId?.fullName || 'Unknown'}`,
+        action: `Booked ${booking.subject} lesson with ${booking.tutorId?.fullName || 'Unknown'}`,
         date: booking.createdAt,
-        status: booking.status
+        status: booking.status,
+        amount: booking.totalAmount
       })),
       ...recentRatings.map(rating => ({
         type: 'rating',
-        action: `Rated ${rating.tutorId?.fullName || 'Unknown'} ${rating.rating} stars`,
-        date: rating.createdAt
+        action: `Rated ${rating.tutorId?.fullName || 'Unknown'} ${rating.rating} stars for ${rating.bookingId?.subject || 'lesson'}`,
+        date: rating.createdAt,
+        rating: rating.rating
       }))
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
 
@@ -1614,18 +1625,111 @@ export const getUserDashboard = async (req, res) => {
         stats: {
           totalBookings,
           completedLessons,
-          totalSpent: totalSpent.toFixed(2),
+          totalSpent: parseFloat(totalSpent.toFixed(2)),
           favoriteTutorsCount: favoriteTutors.length
         },
-        upcomingLessons,
-        favoriteTutors,
+        upcomingLessons: upcomingLessons.map(lesson => ({
+          id: lesson._id,
+          tutorName: lesson.tutorId?.fullName,
+          subject: lesson.subject,
+          scheduledDate: lesson.scheduledDate,
+          duration: lesson.duration,
+          totalAmount: lesson.totalAmount,
+          tutorRating: lesson.tutorId?.averageRating
+        })),
+        favoriteTutors: favoriteTutorsWithCounts,
         recentActivity
       }
     });
   } catch (error) {
+    console.error('Student dashboard error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while retrieving dashboard data',
+      error: error.message,
+    });
+  }
+};
+
+export const getUserBookings = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { page = 1, limit = 10, status, startDate, endDate } = req.query;
+    const studentObjectId = new mongoose.Types.ObjectId(id);
+
+    console.log('Getting bookings for student:', id); // Debug log
+
+    const query = { studentId: studentObjectId };
+
+    // Add filters
+    if (status) {
+      query.status = status;
+    }
+    if (startDate || endDate) {
+      query.scheduledDate = {};
+      if (startDate) query.scheduledDate.$gte = new Date(startDate);
+      if (endDate) query.scheduledDate.$lte = new Date(endDate);
+    }
+
+    console.log('Booking query:', JSON.stringify(query)); // Debug log
+
+    const bookings = await Booking.find(query)
+      .populate('tutorId', 'fullName email subjects hourlyRate location averageRating')
+      .populate('studentId', 'fullName email')
+      .sort({ scheduledDate: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Booking.countDocuments(query);
+
+    console.log('User bookings found:', bookings.length, 'Total:', total); // Debug log
+
+    // Check which completed bookings can be rated
+    const bookingsWithRatingStatus = await Promise.all(
+      bookings.map(async (booking) => {
+        let canBeRated = false;
+        let hasBeenRated = false;
+        let rating = null;
+
+        if (booking.status === 'completed') {
+          const existingRating = await Rating.findOne({
+            studentId: studentObjectId,
+            tutorId: booking.tutorId._id,
+            bookingId: booking._id
+          });
+
+          hasBeenRated = !!existingRating;
+          canBeRated = !hasBeenRated;
+          rating = existingRating;
+        }
+
+        return {
+          ...booking.toObject(),
+          canBeRated,
+          hasBeenRated,
+          rating: rating ? {
+            rating: rating.rating,
+            comment: rating.comment,
+            createdAt: rating.createdAt
+          } : null
+        };
+      })
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        bookings: bookingsWithRatingStatus,
+        totalPages: Math.ceil(total / limit),
+        currentPage: parseInt(page),
+        total
+      }
+    });
+  } catch (error) {
+    console.error('Get user bookings error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while retrieving bookings',
       error: error.message,
     });
   }
@@ -1787,6 +1891,72 @@ export const getWishlist = async (req, res) => {
       status: 'error',
       message: 'An error occurred while retrieving wishlist',
       error: error.message,
+    });
+  }
+};
+
+export const debugDashboardData = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { role } = req.user;
+    
+    console.log('Debug - User ID:', id, 'Role:', role);
+    
+    const userObjectId = new mongoose.Types.ObjectId(id);
+    
+    // Count all bookings for this user
+    let allBookings, allRatings;
+    
+    if (role === 'student') {
+      allBookings = await Booking.find({ studentId: userObjectId });
+      allRatings = await Rating.find({ studentId: userObjectId });
+    } else {
+      allBookings = await Booking.find({ tutorId: userObjectId });
+      allRatings = await Rating.find({ tutorId: userObjectId });
+    }
+    
+    console.log('All bookings:', allBookings.length);
+    console.log('All ratings:', allRatings.length);
+    
+    // Get sample booking to check structure
+    const sampleBooking = allBookings[0];
+    console.log('Sample booking structure:', sampleBooking ? {
+      _id: sampleBooking._id,
+      studentId: sampleBooking.studentId,
+      tutorId: sampleBooking.tutorId,
+      status: sampleBooking.status,
+      totalAmount: sampleBooking.totalAmount
+    } : 'No bookings found');
+    
+    res.status(200).json({
+      status: 'success',
+      debug: {
+        userId: id,
+        userRole: role,
+        userObjectId: userObjectId.toString(),
+        totalBookings: allBookings.length,
+        totalRatings: allRatings.length,
+        sampleBooking: sampleBooking ? {
+          _id: sampleBooking._id,
+          studentId: sampleBooking.studentId,
+          tutorId: sampleBooking.tutorId,
+          status: sampleBooking.status,
+          totalAmount: sampleBooking.totalAmount
+        } : null,
+        bookingStatuses: [...new Set(allBookings.map(b => b.status))],
+        bookingDates: allBookings.map(b => ({
+          id: b._id,
+          date: b.scheduledDate,
+          status: b.status
+        })).slice(0, 5)
+      }
+    });
+  } catch (error) {
+    console.error('Debug dashboard error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Debug failed',
+      error: error.message
     });
   }
 };

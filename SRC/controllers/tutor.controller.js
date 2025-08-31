@@ -809,45 +809,93 @@ export const getTutorById = async (req, res) => {
 export const getDashboardStats = async (req, res) => {
   try {
     const { id } = req.user;
+    console.log('Tutor ID from token:', id); // Debug log
+    
+    // Convert to ObjectId for proper querying
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
         
-    // Get total bookings count
+    // Get total bookings count - Fixed to use ObjectId
     const totalBookings = await Booking.countDocuments({ 
-      tutorId: id,
+      tutorId: tutorObjectId,
       status: { $in: ['confirmed', 'completed'] }
     });
+    console.log('Total bookings:', totalBookings); // Debug log
 
-    // Get unique students count
-    const uniqueStudents = await Booking.distinct('studentId', { 
-      tutorId: id,
-      status: { $in: ['confirmed', 'completed'] }
-    });
+    // Get unique students count - Fixed aggregation
+    const uniqueStudentsAgg = await Booking.aggregate([
+      {
+        $match: {
+          tutorId: tutorObjectId,
+          status: { $in: ['confirmed', 'completed'] }
+        }
+      },
+      {
+        $group: {
+          _id: '$studentId'
+        }
+      },
+      {
+        $count: 'uniqueStudents'
+      }
+    ]);
+    
+    const totalStudents = uniqueStudentsAgg.length > 0 ? uniqueStudentsAgg[0].uniqueStudents : 0;
+    console.log('Unique students:', totalStudents); // Debug log
 
-    // Calculate total earnings
-    const completedBookings = await Booking.find({ 
-      tutorId: id, 
-      status: 'completed' 
-    });
-    const totalEarnings = completedBookings.reduce((sum, booking) => {
-      return sum + (booking.totalAmount || 0);
-    }, 0);
+    // Calculate total earnings - Fixed aggregation
+    const earningsAgg = await Booking.aggregate([
+      {
+        $match: {
+          tutorId: tutorObjectId,
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalEarnings: { $sum: '$totalAmount' },
+          completedCount: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    const totalEarnings = earningsAgg.length > 0 ? earningsAgg[0].totalEarnings : 0;
+    const completedLessonsCount = earningsAgg.length > 0 ? earningsAgg[0].completedCount : 0;
+    console.log('Total earnings:', totalEarnings); // Debug log
 
-    // Get average rating
-    const ratings = await Rating.find({ tutorId: id });
-    const averageRating = ratings.length > 0 
-      ? ratings.reduce((sum, rating) => sum + rating.rating, 0) / ratings.length
-      : 0;
+    // Get average rating - Fixed to use ObjectId
+    const ratingsAgg = await Rating.aggregate([
+      {
+        $match: {
+          tutorId: tutorObjectId
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: '$rating' },
+          totalRatings: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const averageRating = ratingsAgg.length > 0 ? ratingsAgg[0].averageRating : 0;
+    const totalRatings = ratingsAgg.length > 0 ? ratingsAgg[0].totalRatings : 0;
+    console.log('Average rating:', averageRating, 'Total ratings:', totalRatings); // Debug log
 
     res.status(200).json({
       status: 'success',
       data: {
         totalBookings,
-        totalStudents: uniqueStudents.length,
-        totalEarnings: totalEarnings.toFixed(2),
-        averageRating: averageRating.toFixed(1),
-        totalRatings: ratings.length
+        totalStudents,
+        completedLessons: completedLessonsCount,
+        totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+        averageRating: parseFloat(averageRating.toFixed(1)),
+        totalRatings
       }
     });
   } catch (error) {
+    console.error('Tutor dashboard stats error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while retrieving dashboard stats',
@@ -860,42 +908,59 @@ export const getRecentActivity = async (req, res) => {
   try {
     const { id } = req.user;
     const { limit = 10 } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
 
-    // Get recent bookings with student details
-    const recentBookings = await Booking.find({ tutorId: id })
-      .populate('studentId', 'fullName email')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
+    console.log('Getting recent activity for tutor:', id); // Debug log
 
-    // Get recent ratings
-    const recentRatings = await Rating.find({ tutorId: id })
-      .populate('studentId', 'fullName')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
+    // Get recent bookings with student details - Fixed ObjectId usage
+    const recentBookings = await Booking.find({ 
+      tutorId: tutorObjectId 
+    })
+    .populate('studentId', 'fullName email')
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit));
+
+    console.log('Recent bookings found:', recentBookings.length); // Debug log
+
+    // Get recent ratings - Fixed ObjectId usage
+    const recentRatings = await Rating.find({ 
+      tutorId: tutorObjectId 
+    })
+    .populate('studentId', 'fullName')
+    .populate('bookingId', 'subject')
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit));
+
+    console.log('Recent ratings found:', recentRatings.length); // Debug log
 
     // Combine and sort by date
     const activities = [
       ...recentBookings.map(booking => ({
         type: 'booking',
-        action: `New booking from ${booking.studentId?.fullName || 'Unknown'}`,
+        action: `New ${booking.subject} booking from ${booking.studentId?.fullName || 'Unknown Student'}`,
         date: booking.createdAt,
         status: booking.status,
-        amount: booking.totalAmount
+        amount: booking.totalAmount,
+        bookingId: booking._id
       })),
       ...recentRatings.map(rating => ({
         type: 'rating',
-        action: `Received ${rating.rating}-star rating from ${rating.studentId?.fullName || 'Unknown'}`,
+        action: `Received ${rating.rating}-star rating from ${rating.studentId?.fullName || 'Unknown Student'}`,
         date: rating.createdAt,
         rating: rating.rating,
-        comment: rating.comment
+        comment: rating.comment,
+        subject: rating.bookingId?.subject || 'Unknown Subject'
       }))
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, parseInt(limit));
+
+    console.log('Total activities combined:', activities.length); // Debug log
 
     res.status(200).json({
       status: 'success',
       data: activities
     });
   } catch (error) {
+    console.error('Recent activity error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while retrieving recent activity',
@@ -908,10 +973,13 @@ export const getUpcomingLessons = async (req, res) => {
   try {
     const { id } = req.user;
     const { limit = 10 } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    console.log('Getting upcoming lessons for tutor:', id); // Debug log
 
     const now = new Date();
     const upcomingLessons = await Booking.find({
-      tutorId: id,
+      tutorId: tutorObjectId,
       status: 'confirmed',
       scheduledDate: { $gte: now }
     })
@@ -919,16 +987,22 @@ export const getUpcomingLessons = async (req, res) => {
     .sort({ scheduledDate: 1 })
     .limit(parseInt(limit));
 
+    console.log('Upcoming lessons found:', upcomingLessons.length); // Debug log
+
     const formattedLessons = upcomingLessons.map(lesson => ({
       id: lesson._id,
-      student: lesson.studentId?.fullName || 'Unknown',
+      student: lesson.studentId?.fullName || 'Unknown Student',
       studentEmail: lesson.studentId?.email,
       subject: lesson.subject,
-      date: lesson.scheduledDate,
+      scheduledDate: lesson.scheduledDate,
+      startTime: lesson.startTime,
+      endTime: lesson.endTime,
       duration: lesson.duration,
       amount: lesson.totalAmount,
       meetingLink: lesson.meetingLink,
-      status: lesson.status
+      meetingPreference: lesson.meetingPreference,
+      status: lesson.status,
+      notes: lesson.notes
     }));
 
     res.status(200).json({
@@ -936,6 +1010,7 @@ export const getUpcomingLessons = async (req, res) => {
       data: formattedLessons
     });
   } catch (error) {
+    console.error('Upcoming lessons error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while retrieving upcoming lessons',
@@ -948,10 +1023,22 @@ export const getBookingHistory = async (req, res) => {
   try {
     const { id } = req.user;
     const { page = 1, limit = 10, status, startDate, endDate } = req.query;
+    
+    // Determine if this is a student or tutor based on the role
+    const { role } = req.user;
+    const userObjectId = new mongoose.Types.ObjectId(id);
+    
+    console.log('Getting booking history for:', role, id); // Debug log
 
-    const query = { tutorId: id };
+    // Build query based on user role
+    const query = {};
+    if (role === 'student') {
+      query.studentId = userObjectId;
+    } else {
+      query.tutorId = userObjectId;
+    }
 
-    // Add filters
+    // Add additional filters
     if (status) {
       query.status = status;
     }
@@ -961,13 +1048,18 @@ export const getBookingHistory = async (req, res) => {
       if (endDate) query.scheduledDate.$lte = new Date(endDate);
     }
 
+    console.log('Query:', JSON.stringify(query)); // Debug log
+
     const bookings = await Booking.find(query)
+      .populate('tutorId', 'fullName email subjects hourlyRate averageRating')
       .populate('studentId', 'fullName email')
       .sort({ scheduledDate: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
     const total = await Booking.countDocuments(query);
+
+    console.log('Bookings found:', bookings.length, 'Total:', total); // Debug log
 
     res.status(200).json({
       status: 'success',
@@ -979,9 +1071,97 @@ export const getBookingHistory = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Booking history error:', error);
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while retrieving booking history',
+      error: error.message,
+    });
+  }
+};
+
+export const getEarningsReport = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { startDate, endDate, groupBy = 'month' } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    console.log('Getting earnings report for tutor:', id); // Debug log
+
+    const matchStage = {
+      tutorId: tutorObjectId,
+      status: 'completed'
+    };
+
+    if (startDate || endDate) {
+      matchStage.scheduledDate = {};
+      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
+      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
+    }
+
+    console.log('Match stage:', JSON.stringify(matchStage)); // Debug log
+
+    let groupStage;
+    if (groupBy === 'day') {
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 },
+          lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
+        }
+      };
+    } else if (groupBy === 'week') {
+      groupStage = {
+        $group: {
+          _id: { 
+            year: { $year: "$scheduledDate" },
+            week: { $week: "$scheduledDate" }
+          },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 },
+          lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
+        }
+      };
+    } else { // month
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 },
+          lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
+        }
+      };
+    }
+
+    const earnings = await Booking.aggregate([
+      { $match: matchStage },
+      groupStage,
+      { $sort: { _id: 1 } }
+    ]);
+
+    console.log('Earnings aggregation result:', earnings.length); // Debug log
+
+    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
+    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        earnings,
+        summary: {
+          totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+          totalLessons,
+          averagePerLesson: totalLessons > 0 ? parseFloat((totalEarnings / totalLessons).toFixed(2)) : 0,
+          period: groupBy
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Earnings report error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while generating earnings report',
       error: error.message,
     });
   }
@@ -1019,78 +1199,6 @@ export const updateAvailability = async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while updating availability',
-      error: error.message,
-    });
-  }
-};
-
-export const getEarningsReport = async (req, res) => {
-  try {
-    const { id } = req.user;
-    const { startDate, endDate, groupBy = 'month' } = req.query;
-
-    const matchStage = {
-      tutorId: id,
-      status: 'completed'
-    };
-
-    if (startDate || endDate) {
-      matchStage.scheduledDate = {};
-      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
-      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
-    }
-
-    let groupStage;
-    if (groupBy === 'day') {
-      groupStage = {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
-          totalEarnings: { $sum: "$totalAmount" },
-          totalLessons: { $sum: 1 }
-        }
-      };
-    } else if (groupBy === 'week') {
-      groupStage = {
-        $group: {
-          _id: { $dateToString: { format: "%Y-W%V", date: "$scheduledDate" } },
-          totalEarnings: { $sum: "$totalAmount" },
-          totalLessons: { $sum: 1 }
-        }
-      };
-    } else { // month
-      groupStage = {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
-          totalEarnings: { $sum: "$totalAmount" },
-          totalLessons: { $sum: 1 }
-        }
-      };
-    }
-
-    const earnings = await Booking.aggregate([
-      { $match: matchStage },
-      groupStage,
-      { $sort: { _id: 1 } }
-    ]);
-
-    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
-    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        earnings,
-        summary: {
-          totalEarnings: totalEarnings.toFixed(2),
-          totalLessons,
-          averagePerLesson: totalLessons > 0 ? (totalEarnings / totalLessons).toFixed(2) : 0
-        }
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while generating earnings report',
       error: error.message,
     });
   }
@@ -1387,6 +1495,72 @@ export const updateLessonNotes = async (req, res) => {
       status: 'error',
       message: 'An error occurred while updating lesson notes',
       error: error.message,
+    });
+  }
+};
+
+export const debugDashboardData = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { role } = req.user;
+    
+    console.log('Debug - User ID:', id, 'Role:', role);
+    
+    const userObjectId = new mongoose.Types.ObjectId(id);
+    
+    // Count all bookings for this user
+    let allBookings, allRatings;
+    
+    if (role === 'student') {
+      allBookings = await Booking.find({ studentId: userObjectId });
+      allRatings = await Rating.find({ studentId: userObjectId });
+    } else {
+      allBookings = await Booking.find({ tutorId: userObjectId });
+      allRatings = await Rating.find({ tutorId: userObjectId });
+    }
+    
+    console.log('All bookings:', allBookings.length);
+    console.log('All ratings:', allRatings.length);
+    
+    // Get sample booking to check structure
+    const sampleBooking = allBookings[0];
+    console.log('Sample booking structure:', sampleBooking ? {
+      _id: sampleBooking._id,
+      studentId: sampleBooking.studentId,
+      tutorId: sampleBooking.tutorId,
+      status: sampleBooking.status,
+      totalAmount: sampleBooking.totalAmount
+    } : 'No bookings found');
+    
+    res.status(200).json({
+      status: 'success',
+      debug: {
+        userId: id,
+        userRole: role,
+        userObjectId: userObjectId.toString(),
+        totalBookings: allBookings.length,
+        totalRatings: allRatings.length,
+        sampleBooking: sampleBooking ? {
+          _id: sampleBooking._id,
+          studentId: sampleBooking.studentId,
+          tutorId: sampleBooking.tutorId,
+          status: sampleBooking.status,
+          totalAmount: sampleBooking.totalAmount
+        } : null,
+        bookingStatuses: [...new Set(allBookings.map(b => b.status))],
+        bookingDates: allBookings.map(b => ({
+          id: b._id,
+          date: b.scheduledDate,
+          status: b.status
+        })).slice(0, 5)
+      }
+    });
+  } catch (error) {
+    console.error('Debug dashboard error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Debug failed',
+      error: error.message
     });
   }
 };
