@@ -809,19 +809,41 @@ export const getTutorById = async (req, res) => {
 export const getDashboardStats = async (req, res) => {
   try {
     const { id } = req.user;
-    console.log('Tutor ID from token:', id); // Debug log
-    
-    // Convert to ObjectId for proper querying
     const tutorObjectId = new mongoose.Types.ObjectId(id);
         
-    // Get total bookings count - Fixed to use ObjectId
-    const totalBookings = await Booking.countDocuments({ 
-      tutorId: tutorObjectId,
-      status: { $in: ['confirmed', 'completed'] }
-    });
-    console.log('Total bookings:', totalBookings); // Debug log
+    // Get comprehensive stats using aggregation
+    const statsAggregation = await Booking.aggregate([
+      {
+        $match: { tutorId: tutorObjectId }
+      },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$totalAmount' },
+          totalHours: { $sum: '$duration' }
+        }
+      }
+    ]);
 
-    // Get unique students count - Fixed aggregation
+    // Process aggregation results
+    let totalBookings = 0;
+    let completedLessons = 0;
+    let totalEarnings = 0;
+    let totalHoursTaught = 0;
+
+    statsAggregation.forEach(stat => {
+      if (['confirmed', 'completed'].includes(stat._id)) {
+        totalBookings += stat.count;
+        totalHoursTaught += stat.totalHours;
+      }
+      if (stat._id === 'completed') {
+        completedLessons = stat.count;
+        totalEarnings = stat.totalAmount;
+      }
+    });
+
+    // Get unique students count
     const uniqueStudentsAgg = await Booking.aggregate([
       {
         $match: {
@@ -840,35 +862,11 @@ export const getDashboardStats = async (req, res) => {
     ]);
     
     const totalStudents = uniqueStudentsAgg.length > 0 ? uniqueStudentsAgg[0].uniqueStudents : 0;
-    console.log('Unique students:', totalStudents); // Debug log
 
-    // Calculate total earnings - Fixed aggregation
-    const earningsAgg = await Booking.aggregate([
-      {
-        $match: {
-          tutorId: tutorObjectId,
-          status: 'completed'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalEarnings: { $sum: '$totalAmount' },
-          completedCount: { $sum: 1 }
-        }
-      }
-    ]);
-    
-    const totalEarnings = earningsAgg.length > 0 ? earningsAgg[0].totalEarnings : 0;
-    const completedLessonsCount = earningsAgg.length > 0 ? earningsAgg[0].completedCount : 0;
-    console.log('Total earnings:', totalEarnings); // Debug log
-
-    // Get average rating - Fixed to use ObjectId
+    // Get average rating
     const ratingsAgg = await Rating.aggregate([
       {
-        $match: {
-          tutorId: tutorObjectId
-        }
+        $match: { tutorId: tutorObjectId }
       },
       {
         $group: {
@@ -881,14 +879,14 @@ export const getDashboardStats = async (req, res) => {
 
     const averageRating = ratingsAgg.length > 0 ? ratingsAgg[0].averageRating : 0;
     const totalRatings = ratingsAgg.length > 0 ? ratingsAgg[0].totalRatings : 0;
-    console.log('Average rating:', averageRating, 'Total ratings:', totalRatings); // Debug log
 
     res.status(200).json({
       status: 'success',
       data: {
         totalBookings,
         totalStudents,
-        completedLessons: completedLessonsCount,
+        completedLessons,
+        totalHoursTaught, // Added for better tracking
         totalEarnings: parseFloat(totalEarnings.toFixed(2)),
         averageRating: parseFloat(averageRating.toFixed(1)),
         totalRatings
@@ -904,6 +902,103 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
+// FIXED TUTOR EARNINGS REPORT FUNCTION  
+export const getEarningsReport = async (req, res) => {
+  try {
+    const { id } = req.user;
+    const { startDate, endDate, groupBy = 'month' } = req.query;
+    const tutorObjectId = new mongoose.Types.ObjectId(id);
+
+    // Build match stage
+    const matchStage = {
+      tutorId: tutorObjectId,
+      status: 'completed'
+    };
+
+    if (startDate || endDate) {
+      matchStage.scheduledDate = {};
+      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
+      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
+    }
+
+    // Build group stage based on groupBy parameter
+    let groupStage;
+    const currentDate = new Date();
+    const thisMonth = currentDate.toISOString().substring(0, 7); // YYYY-MM format
+    const lastMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1).toISOString().substring(0, 7);
+
+    if (groupBy === 'day') {
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 },
+          totalHours: { $sum: "$duration" }
+        }
+      };
+    } else if (groupBy === 'week') {
+      groupStage = {
+        $group: {
+          _id: { 
+            year: { $year: "$scheduledDate" },
+            week: { $week: "$scheduledDate" }
+          },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 },
+          totalHours: { $sum: "$duration" }
+        }
+      };
+    } else { // month
+      groupStage = {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
+          totalEarnings: { $sum: "$totalAmount" },
+          totalLessons: { $sum: 1 },
+          totalHours: { $sum: "$duration" }
+        }
+      };
+    }
+
+    const earnings = await Booking.aggregate([
+      { $match: matchStage },
+      groupStage,
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Calculate summary statistics
+    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
+    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
+    const totalHours = earnings.reduce((sum, item) => sum + item.totalHours, 0);
+
+    // Get current month and last month earnings for the specific format shown in your image
+    const thisMonthEarnings = earnings.find(e => e._id === thisMonth)?.totalEarnings || 0;
+    const lastMonthEarnings = earnings.find(e => e._id === lastMonth)?.totalEarnings || 0;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        earnings,
+        summary: {
+          totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+          totalLessons,
+          totalHours,
+          averagePerLesson: totalLessons > 0 ? parseFloat((totalEarnings / totalLessons).toFixed(2)) : 0,
+          averagePerHour: totalHours > 0 ? parseFloat((totalEarnings / totalHours).toFixed(2)) : 0,
+          thisMonthEarnings: parseFloat(thisMonthEarnings.toFixed(2)),
+          lastMonthEarnings: parseFloat(lastMonthEarnings.toFixed(2)),
+          period: groupBy
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Earnings report error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while generating earnings report',
+      error: error.message,
+    });
+  }
+};
 export const getRecentActivity = async (req, res) => {
   try {
     const { id } = req.user;
@@ -1080,92 +1175,92 @@ export const getBookingHistory = async (req, res) => {
   }
 };
 
-export const getEarningsReport = async (req, res) => {
-  try {
-    const { id } = req.user;
-    const { startDate, endDate, groupBy = 'month' } = req.query;
-    const tutorObjectId = new mongoose.Types.ObjectId(id);
+// export const getEarningsReport = async (req, res) => {
+//   try {
+//     const { id } = req.user;
+//     const { startDate, endDate, groupBy = 'month' } = req.query;
+//     const tutorObjectId = new mongoose.Types.ObjectId(id);
 
-    console.log('Getting earnings report for tutor:', id); // Debug log
+//     console.log('Getting earnings report for tutor:', id); // Debug log
 
-    const matchStage = {
-      tutorId: tutorObjectId,
-      status: 'completed'
-    };
+//     const matchStage = {
+//       tutorId: tutorObjectId,
+//       status: 'completed'
+//     };
 
-    if (startDate || endDate) {
-      matchStage.scheduledDate = {};
-      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
-      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
-    }
+//     if (startDate || endDate) {
+//       matchStage.scheduledDate = {};
+//       if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
+//       if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
+//     }
 
-    console.log('Match stage:', JSON.stringify(matchStage)); // Debug log
+//     console.log('Match stage:', JSON.stringify(matchStage)); // Debug log
 
-    let groupStage;
-    if (groupBy === 'day') {
-      groupStage = {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
-          totalEarnings: { $sum: "$totalAmount" },
-          totalLessons: { $sum: 1 },
-          lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
-        }
-      };
-    } else if (groupBy === 'week') {
-      groupStage = {
-        $group: {
-          _id: { 
-            year: { $year: "$scheduledDate" },
-            week: { $week: "$scheduledDate" }
-          },
-          totalEarnings: { $sum: "$totalAmount" },
-          totalLessons: { $sum: 1 },
-          lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
-        }
-      };
-    } else { // month
-      groupStage = {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
-          totalEarnings: { $sum: "$totalAmount" },
-          totalLessons: { $sum: 1 },
-          lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
-        }
-      };
-    }
+//     let groupStage;
+//     if (groupBy === 'day') {
+//       groupStage = {
+//         $group: {
+//           _id: { $dateToString: { format: "%Y-%m-%d", date: "$scheduledDate" } },
+//           totalEarnings: { $sum: "$totalAmount" },
+//           totalLessons: { $sum: 1 },
+//           lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
+//         }
+//       };
+//     } else if (groupBy === 'week') {
+//       groupStage = {
+//         $group: {
+//           _id: { 
+//             year: { $year: "$scheduledDate" },
+//             week: { $week: "$scheduledDate" }
+//           },
+//           totalEarnings: { $sum: "$totalAmount" },
+//           totalLessons: { $sum: 1 },
+//           lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
+//         }
+//       };
+//     } else { // month
+//       groupStage = {
+//         $group: {
+//           _id: { $dateToString: { format: "%Y-%m", date: "$scheduledDate" } },
+//           totalEarnings: { $sum: "$totalAmount" },
+//           totalLessons: { $sum: 1 },
+//           lessons: { $push: { subject: "$subject", amount: "$totalAmount", date: "$scheduledDate" } }
+//         }
+//       };
+//     }
 
-    const earnings = await Booking.aggregate([
-      { $match: matchStage },
-      groupStage,
-      { $sort: { _id: 1 } }
-    ]);
+//     const earnings = await Booking.aggregate([
+//       { $match: matchStage },
+//       groupStage,
+//       { $sort: { _id: 1 } }
+//     ]);
 
-    console.log('Earnings aggregation result:', earnings.length); // Debug log
+//     console.log('Earnings aggregation result:', earnings.length); // Debug log
 
-    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
-    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
+//     const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
+//     const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
 
-    res.status(200).json({
-      status: 'success',
-      data: {
-        earnings,
-        summary: {
-          totalEarnings: parseFloat(totalEarnings.toFixed(2)),
-          totalLessons,
-          averagePerLesson: totalLessons > 0 ? parseFloat((totalEarnings / totalLessons).toFixed(2)) : 0,
-          period: groupBy
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Earnings report error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'An error occurred while generating earnings report',
-      error: error.message,
-    });
-  }
-};
+//     res.status(200).json({
+//       status: 'success',
+//       data: {
+//         earnings,
+//         summary: {
+//           totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+//           totalLessons,
+//           averagePerLesson: totalLessons > 0 ? parseFloat((totalEarnings / totalLessons).toFixed(2)) : 0,
+//           period: groupBy
+//         }
+//       }
+//     });
+//   } catch (error) {
+//     console.error('Earnings report error:', error);
+//     res.status(500).json({
+//       status: 'error',
+//       message: 'An error occurred while generating earnings report',
+//       error: error.message,
+//     });
+//   }
+// };
 
 export const updateAvailability = async (req, res) => {
   try {

@@ -1498,26 +1498,23 @@ export const getUserRatings = async (req, res) => {
 export const getUserDashboard = async (req, res) => {
   try {
     const { id } = req.user;
-    console.log('User ID from token:', id); // Debug log
+    console.log('User ID from token:', id);
 
-    // Convert to ObjectId for proper querying
     const studentObjectId = new mongoose.Types.ObjectId(id);
 
     // Get total bookings
     const totalBookings = await Booking.countDocuments({ 
       studentId: studentObjectId 
     });
-    console.log('Total bookings:', totalBookings); // Debug log
 
     // Get completed lessons
     const completedLessons = await Booking.countDocuments({ 
       studentId: studentObjectId, 
       status: 'completed' 
     });
-    console.log('Completed lessons:', completedLessons); // Debug log
 
-    // Get total spent - only from completed bookings
-    const completedBookingsAgg = await Booking.aggregate([
+    // Calculate total hours learned from completed lessons
+    const completedLessonsWithHours = await Booking.aggregate([
       { 
         $match: { 
           studentId: studentObjectId, 
@@ -1527,14 +1524,16 @@ export const getUserDashboard = async (req, res) => {
       {
         $group: {
           _id: null,
+          totalHours: { $sum: '$duration' },
           totalSpent: { $sum: '$totalAmount' }
         }
       }
     ]);
-    const totalSpent = completedBookingsAgg.length > 0 ? completedBookingsAgg[0].totalSpent : 0;
-    console.log('Total spent:', totalSpent); // Debug log
 
-    // Get favorite tutors (most booked) - Fixed aggregation
+    const totalHoursLearned = completedLessonsWithHours.length > 0 ? completedLessonsWithHours[0].totalHours : 0;
+    const totalSpent = completedLessonsWithHours.length > 0 ? completedLessonsWithHours[0].totalSpent : 0;
+
+    // Get favorite tutors (most booked)
     const tutorBookings = await Booking.aggregate([
       { 
         $match: { 
@@ -1552,8 +1551,6 @@ export const getUserDashboard = async (req, res) => {
       { $sort: { bookingCount: -1 } },
       { $limit: 5 }
     ]);
-
-    console.log('Tutor bookings aggregation:', tutorBookings); // Debug log
 
     // Get tutor details for favorite tutors
     const favoriteTutorIds = tutorBookings.map(tb => tb._id);
@@ -1582,9 +1579,7 @@ export const getUserDashboard = async (req, res) => {
     .sort({ scheduledDate: 1 })
     .limit(5);
 
-    console.log('Upcoming lessons:', upcomingLessons.length); // Debug log
-
-    // Get recent activity - Fixed to use proper ObjectId
+    // Get recent activity
     const recentBookings = await Booking.find({ 
       studentId: studentObjectId 
     })
@@ -1599,9 +1594,6 @@ export const getUserDashboard = async (req, res) => {
     .populate('bookingId', 'subject')
     .sort({ createdAt: -1 })
     .limit(5);
-
-    console.log('Recent bookings:', recentBookings.length); // Debug log
-    console.log('Recent ratings:', recentRatings.length); // Debug log
 
     const recentActivity = [
       ...recentBookings.map(booking => ({
@@ -1625,6 +1617,7 @@ export const getUserDashboard = async (req, res) => {
         stats: {
           totalBookings,
           completedLessons,
+          totalHoursLearned, // Fixed: Now properly calculated
           totalSpent: parseFloat(totalSpent.toFixed(2)),
           favoriteTutorsCount: favoriteTutors.length
         },
@@ -1650,6 +1643,7 @@ export const getUserDashboard = async (req, res) => {
     });
   }
 };
+
 
 export const getUserBookings = async (req, res) => {
   try {

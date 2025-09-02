@@ -5,7 +5,7 @@ import { google } from 'googleapis';
 import { createTransport } from 'nodemailer';
 const OAuth2 = google.auth.OAuth2;
 
-const { GMAIL_NAME, REDIRECT_URI, CLIENT_ID, CLIENT_SECRET , REFRESH_TOKEN, accessToken } = process.env;
+const { GMAIL_NAME, REDIRECT_URI, CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN } = process.env;
 
 console.log({
     GMAIL_NAME,
@@ -26,7 +26,7 @@ const smtpTransport = createTransport({
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
         refreshToken: REFRESH_TOKEN,
-        accessToken: accessToken
+        // accessToken: accessToken
     },
     tls: {
         rejectUnauthorized: false
