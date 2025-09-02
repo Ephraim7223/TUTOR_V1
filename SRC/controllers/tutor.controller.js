@@ -905,9 +905,41 @@ export const getDashboardStats = async (req, res) => {
 // FIXED TUTOR EARNINGS REPORT FUNCTION  
 export const getEarningsReport = async (req, res) => {
   try {
+    // Add debug logging
+    console.log('📊 getEarningsReport called');
+    console.log('User:', req.user);
+    console.log('Query params:', req.query);
+
     const { id } = req.user;
+    
+    // Validate user ID
+    if (!id) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User ID not found in token'
+      });
+    }
+
     const { startDate, endDate, groupBy = 'month' } = req.query;
-    const tutorObjectId = new mongoose.Types.ObjectId(id);
+    
+    // Validate groupBy parameter
+    const validGroupBy = ['day', 'week', 'month'];
+    if (!validGroupBy.includes(groupBy)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid groupBy parameter. Must be one of: day, week, month'
+      });
+    }
+
+    let tutorObjectId;
+    try {
+      tutorObjectId = new mongoose.Types.ObjectId(id);
+    } catch (error) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid user ID format'
+      });
+    }
 
     // Build match stage
     const matchStage = {
@@ -915,11 +947,36 @@ export const getEarningsReport = async (req, res) => {
       status: 'completed'
     };
 
+    // Validate and add date filters
     if (startDate || endDate) {
       matchStage.scheduledDate = {};
-      if (startDate) matchStage.scheduledDate.$gte = new Date(startDate);
-      if (endDate) matchStage.scheduledDate.$lte = new Date(endDate);
+      
+      if (startDate) {
+        const start = new Date(startDate);
+        if (isNaN(start.getTime())) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid startDate format. Use YYYY-MM-DD'
+          });
+        }
+        matchStage.scheduledDate.$gte = start;
+      }
+      
+      if (endDate) {
+        const end = new Date(endDate);
+        if (isNaN(end.getTime())) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Invalid endDate format. Use YYYY-MM-DD'
+          });
+        }
+        // Set to end of day
+        end.setHours(23, 59, 59, 999);
+        matchStage.scheduledDate.$lte = end;
+      }
     }
+
+    console.log('Match stage:', JSON.stringify(matchStage, null, 2));
 
     // Build group stage based on groupBy parameter
     let groupStage;
@@ -939,7 +996,7 @@ export const getEarningsReport = async (req, res) => {
     } else if (groupBy === 'week') {
       groupStage = {
         $group: {
-          _id: { 
+          _id: {
             year: { $year: "$scheduledDate" },
             week: { $week: "$scheduledDate" }
           },
@@ -959,46 +1016,106 @@ export const getEarningsReport = async (req, res) => {
       };
     }
 
+    console.log('Group stage:', JSON.stringify(groupStage, null, 2));
+
+    // Execute aggregation
     const earnings = await Booking.aggregate([
       { $match: matchStage },
       groupStage,
       { $sort: { _id: 1 } }
     ]);
 
-    // Calculate summary statistics
-    const totalEarnings = earnings.reduce((sum, item) => sum + item.totalEarnings, 0);
-    const totalLessons = earnings.reduce((sum, item) => sum + item.totalLessons, 0);
-    const totalHours = earnings.reduce((sum, item) => sum + item.totalHours, 0);
+    console.log('Aggregation result:', earnings);
 
-    // Get current month and last month earnings for the specific format shown in your image
+    // Check if any data was found
+    if (!earnings || earnings.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        message: 'No completed bookings found for the specified period',
+        data: {
+          earnings: [],
+          summary: {
+            totalEarnings: 0,
+            totalLessons: 0,
+            totalHours: 0,
+            averagePerLesson: 0,
+            averagePerHour: 0,
+            thisMonthEarnings: 0,
+            lastMonthEarnings: 0,
+            period: groupBy
+          }
+        }
+      });
+    }
+
+    // Calculate summary statistics
+    const totalEarnings = earnings.reduce((sum, item) => sum + (item.totalEarnings || 0), 0);
+    const totalLessons = earnings.reduce((sum, item) => sum + (item.totalLessons || 0), 0);
+    const totalHours = earnings.reduce((sum, item) => sum + (item.totalHours || 0), 0);
+
+    // Get current month and last month earnings
     const thisMonthEarnings = earnings.find(e => e._id === thisMonth)?.totalEarnings || 0;
     const lastMonthEarnings = earnings.find(e => e._id === lastMonth)?.totalEarnings || 0;
 
-    res.status(200).json({
+    // Calculate percentage change
+    const percentageChange = lastMonthEarnings > 0 
+      ? ((thisMonthEarnings - lastMonthEarnings) / lastMonthEarnings * 100).toFixed(1)
+      : thisMonthEarnings > 0 ? 100 : 0;
+
+    const responseData = {
       status: 'success',
       data: {
-        earnings,
+        earnings: earnings.map(item => ({
+          period: item._id,
+          totalEarnings: parseFloat((item.totalEarnings || 0).toFixed(2)),
+          totalLessons: item.totalLessons || 0,
+          totalHours: parseFloat((item.totalHours || 0).toFixed(2))
+        })),
         summary: {
           totalEarnings: parseFloat(totalEarnings.toFixed(2)),
           totalLessons,
-          totalHours,
+          totalHours: parseFloat(totalHours.toFixed(2)),
           averagePerLesson: totalLessons > 0 ? parseFloat((totalEarnings / totalLessons).toFixed(2)) : 0,
           averagePerHour: totalHours > 0 ? parseFloat((totalEarnings / totalHours).toFixed(2)) : 0,
           thisMonthEarnings: parseFloat(thisMonthEarnings.toFixed(2)),
           lastMonthEarnings: parseFloat(lastMonthEarnings.toFixed(2)),
+          percentageChange: parseFloat(percentageChange),
           period: groupBy
         }
       }
-    });
+    };
+
+    console.log('Response data:', responseData);
+    res.status(200).json(responseData);
+
   } catch (error) {
-    console.error('Earnings report error:', error);
+    console.error('❌ Earnings report error:', error);
+    
+    // Handle specific MongoDB errors
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid ID format',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Validation error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+
     res.status(500).json({
       status: 'error',
       message: 'An error occurred while generating earnings report',
-      error: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };
+
 export const getRecentActivity = async (req, res) => {
   try {
     const { id } = req.user;
